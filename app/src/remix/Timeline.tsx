@@ -401,6 +401,24 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
   const totalBeats = Math.max(64 * 4, Math.ceil((projectLength(project) + 64) / 16) * 16);
   const width = totalBeats * zoom;
 
+  // Ctrl+wheel zooms around the mouse (native listener: it must preventDefault page zoom).
+  useEffect(() => {
+    const sc = scroller.current;
+    if (!sc) return;
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      e.preventDefault();
+      const r = sc.getBoundingClientRect();
+      const zoomNow = useRemix.getState().zoom;
+      const anchorBeat = (e.clientX - r.left - HEADER_W + sc.scrollLeft) / zoomNow;
+      const next = Math.max(6, Math.min(120, zoomNow * (e.deltaY > 0 ? 0.85 : 1.18)));
+      useRemix.getState().set({ zoom: next });
+      requestAnimationFrame(() => (sc.scrollLeft = Math.max(0, anchorBeat * next - (e.clientX - r.left - HEADER_W))));
+    };
+    sc.addEventListener('wheel', onWheel, { passive: false });
+    return () => sc.removeEventListener('wheel', onWheel);
+  }, []);
+
   useRaf(() => {
     const el = playhead.current;
     if (!el) return;
@@ -462,7 +480,11 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
   const loop = project.loop;
 
   return (
-    <div ref={scroller} style={{ position: 'relative', overflow: 'auto', height: '100%' }} onPointerDown={() => useRemix.getState().select(null)}>
+    <div
+      ref={scroller}
+      style={{ position: 'relative', overflow: 'auto', height: '100%' }}
+      onPointerDown={() => useRemix.getState().select(null)}
+    >
       <div style={{ width: HEADER_W + width, position: 'relative', minHeight: '100%' }}>
         {/* Ruler */}
         <div style={{ position: 'sticky', top: 0, zIndex: 5, display: 'flex', height: RULER_H }}>

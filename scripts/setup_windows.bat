@@ -14,7 +14,7 @@ python -m pip install --upgrade pip
 echo.
 echo === 2/4  Installing PyTorch (CPU build) and audio libraries ===
 REM For an NVIDIA GPU instead, replace the next line with the CUDA command from https://pytorch.org
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 if errorlevel 1 exit /b 1
 pip install -r backend\requirements-dev.txt
 if errorlevel 1 exit /b 1

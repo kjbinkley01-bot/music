@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .audio_io import BROWSER_DECODABLE, decode, read_metadata, write_audio
+from .audio_io import BROWSER_DECODABLE, decode, needs_transcode, read_metadata, write_audio
 from .config import AUDIO_EXTENSIONS, CACHE_DIR, SAMPLES_DIR, STEM_NAMES, settings
 from .db import db
 from .exporter import export_stems, recorder, save_render, stem_paths, unique_path
@@ -77,9 +77,8 @@ def _import_file(path: Path, is_remix: bool = False, preset: dict | None = None)
     meta = read_metadata(path)
     track_id = db.insert_track(key, meta, is_remix=is_remix)
     if preset:
-        db.update_track(track_id, **preset, analysis_status="done")
-    else:
-        jobs.enqueue(track_id, "analyze")
+        db.update_track(track_id, **preset)
+    jobs.enqueue(track_id, "analyze")  # presets keep their tempo/grid; analysis adds loudness & energy
     if settings.get("auto_separate") and not is_remix:
         jobs.enqueue(track_id, "separate")
     return track_id
@@ -188,7 +187,7 @@ def track_audio(track_id: int):
     path = Path(track["path"])
     if not path.exists():
         raise HTTPException(404, "The original file has been moved or deleted")
-    if path.suffix.lower() in BROWSER_DECODABLE:
+    if path.suffix.lower() in BROWSER_DECODABLE and not needs_transcode(path):
         return FileResponse(path)
     cached = CACHE_DIR / "playback" / f"{track_id}_{path.stat().st_mtime_ns}.flac"
     if not cached.exists():

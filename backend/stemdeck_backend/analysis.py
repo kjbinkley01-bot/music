@@ -117,13 +117,20 @@ def refine_tempo(onset_env: np.ndarray, frame_rate: float, coarse_bpm: float, ph
     from `phase_env` (a kick/bass band envelope) when given, because bright off-beat hi-hats
     would otherwise pull the grid onto the "and" of each beat.
     """
-    o = onset_env - onset_env.mean()
+    # Eight minutes is plenty for sub-0.01 BPM precision and keeps DJ-mix length files cheap.
+    limit = int(8 * 60 * frame_rate)
+    o = onset_env[:limit] - onset_env[:limit].mean()
     t = np.arange(len(o)) / frame_rate
 
     def score(bpms: np.ndarray) -> np.ndarray:
-        f = bpms[:, None] / 60.0
-        # fundamental plus the 2nd harmonic (off-beats) for robustness
-        return np.abs(np.exp(-2j * np.pi * f * t) @ o) + 0.5 * np.abs(np.exp(-4j * np.pi * f * t) @ o)
+        # Evaluated a few candidates at a time: the full (candidates x frames) matrix of complex
+        # exponentials would need hundreds of MB for a long track.
+        out = np.empty(len(bpms))
+        for i in range(0, len(bpms), 8):
+            f = bpms[i : i + 8, None] / 60.0
+            # fundamental plus the 2nd harmonic (off-beats) for robustness
+            out[i : i + 8] = np.abs(np.exp(-2j * np.pi * f * t) @ o) + 0.5 * np.abs(np.exp(-4j * np.pi * f * t) @ o)
+        return out
 
     lo, hi = coarse_bpm * 0.94, coarse_bpm * 1.06
     grid = np.arange(lo, hi, 0.05)

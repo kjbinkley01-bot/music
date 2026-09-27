@@ -17,6 +17,7 @@ from pathlib import Path
 from . import analysis
 from .config import STEMS_DIR, settings
 from .db import db
+from .procutil import exit_with_parent
 from .separation import SeparationProcess, SeparationRequest
 
 log = logging.getLogger("stemdeck.jobs")
@@ -47,13 +48,19 @@ class JobManager:
             event.set()
         self._cancel.update(self._live.keys())
         if self._pool:
+            for proc in list((getattr(self._pool, "_processes", None) or {}).values()):
+                proc.terminate()
             self._pool.shutdown(wait=False, cancel_futures=True)
+            self._pool = None
 
     # ---- public API -----------------------------------------------------------
 
     def enqueue(self, track_id: int, kind: str, quality: str | None = None) -> int:
         if kind == "separate":
             quality = quality or settings.get("quality")
+            running = db.one("SELECT id FROM jobs WHERE track_id=? AND kind='separate' AND status='running'", (track_id,))
+            if running:
+                return int(running["id"])
             db.update_track(track_id, stem_status="queued", error=None)
         job_id = db.add_job(track_id, kind, quality)
         self._wake[kind].set()
@@ -108,9 +115,15 @@ class JobManager:
             db.update_job(job["id"], status="running", started_at=time.time(), message="Analysing")
             try:
                 if self._pool is None:
-                    self._pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"))
+                    self._pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"), initializer=exit_with_parent)
                 result = self._pool.submit(analysis.analyze, track["path"]).result()
                 duration = result.pop("duration")
+                if track["is_remix"] and track["bpm"]:
+                    # A rendered remix's tempo and grid are exact (project BPM, beat 1 at 0 s).
+                    for key in ("bpm", "first_beat"):
+                        result.pop(key)
+                    if track["key_pc"] is not None:
+                        result.pop("key_pc"), result.pop("key_mode"), result.pop("key_confidence")
                 fields = {**result, "analysis_status": "done", "error": None}
                 if not track["duration"]:
                     fields["duration"] = duration

@@ -8,6 +8,7 @@ import multiprocessing
 import os
 import sys
 import threading
+import time
 
 
 def _watch_stdin() -> None:
@@ -40,8 +41,17 @@ def main() -> None:
     soundcloud.redirect_uri = f"http://127.0.0.1:{args.port}/soundcloud/callback"
     if args.watch_stdin:
         threading.Thread(target=_watch_stdin, daemon=True).start()
-    print(f"STEMDECK_READY port={args.port}", flush=True)
-    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    server = uvicorn.Server(uvicorn.Config(app, host=args.host, port=args.port, log_level="warning"))
+
+    def announce() -> None:
+        # Tell Electron we're ready only once the socket is actually accepting connections.
+        while not server.started and not server.should_exit:
+            time.sleep(0.05)
+        if server.started:
+            print(f"STEMDECK_READY port={args.port}", flush=True)
+
+    threading.Thread(target=announce, daemon=True).start()
+    server.run()
 
 
 if __name__ == "__main__":

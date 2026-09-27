@@ -166,6 +166,7 @@ export class Deck {
     this.soloStem = null;
     this.loop = null;
     this.playing = false;
+    this.previewing = false;
     this.basePos = 0;
     this.cuePoint = track.first_beat && track.first_beat < 2 ? track.first_beat : 0;
     node.port.postMessage({ type: 'load', stems, length, gains: sources.map(() => 1) }, transfer);
@@ -208,7 +209,7 @@ export class Deck {
     let p = this.basePos + ((performance.now() - this.baseTime) / 1000) * this.rate * (1 + this.nudge);
     if (this.loop && p >= this.loop.end) {
       const len = this.loop.end - this.loop.start;
-      p = this.loop.start + ((p - this.loop.end) % len);
+      p = this.loop.start + ((p - this.loop.start) % len);
     }
     return Math.min(p, this.duration);
   }

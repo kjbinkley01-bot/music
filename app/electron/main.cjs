@@ -131,8 +131,9 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#06070c',
     title: 'StemDeck',
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     titleBarStyle: process.platform === 'win32' ? 'hidden' : 'default',
-    titleBarOverlay: process.platform === 'win32' ? { color: '#00000000', symbolColor: '#c9d1ff', height: 44 } : false,
+    titleBarOverlay: process.platform === 'win32' ? { color: '#0a0c15', symbolColor: '#c9d1ff', height: 43 } : false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -142,6 +143,9 @@ function createWindow() {
     },
   });
   win.removeMenu();
+  // Ctrl+wheel is used for zooming timelines; never zoom the whole UI.
+  win.webContents.setVisualZoomLevelLimits(1, 1);
+  win.webContents.on('zoom-changed', () => win.webContents.setZoomLevel(0));
   if (isDev && process.env.STEMDECK_DEV) win.loadURL('http://localhost:5173');
   else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
 

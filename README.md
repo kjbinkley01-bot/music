@@ -69,7 +69,7 @@ Electron starts the Python engine for you. The **first** separation downloads th
 cd backend
 py -3.11 -m venv .venv
 .venv\Scripts\activate
-pip install torch --index-url https://download.pytorch.org/whl/cpu
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements-dev.txt
 cd ..\app
 npm install

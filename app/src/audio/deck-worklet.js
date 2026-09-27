@@ -120,6 +120,13 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.port.postMessage({ type: 'pos', pos: Math.max(0, this.pos - queued), playing: this.playing });
   }
 
+  /** Map a position past the loop end back inside the loop (modulo, so a loop that just
+   *  shrank behind the playhead lands correctly in one step). */
+  wrap(pos) {
+    const len = this.loopEnd - this.loopStart;
+    return this.loopStart + ((pos - this.loopStart) % len);
+  }
+
   loopActive() {
     return this.loopEnd > this.loopStart && this.loopStart >= 0;
   }
@@ -215,7 +222,7 @@ class DeckProcessor extends AudioWorkletProcessor {
     this.prevIp = ip;
     this.pos += HOP * this.rate;
     if (this.loopActive() && this.pos >= this.loopEnd) {
-      this.pos = this.loopStart + (this.pos - this.loopEnd);
+      this.pos = this.wrap(this.pos);
       this.fresh = true; // overlap-add crossfades the jump smoothly
     }
   }
@@ -262,7 +269,7 @@ class DeckProcessor extends AudioWorkletProcessor {
       outL[i] = l;
       outR[i] = r;
       pos += this.rate;
-      if (loop && pos >= this.loopEnd) pos = this.loopStart + (pos - this.loopEnd);
+      if (loop && pos >= this.loopEnd) pos = this.wrap(pos);
     }
     this.pos = pos;
   }

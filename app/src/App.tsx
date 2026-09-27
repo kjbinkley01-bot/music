@@ -38,7 +38,8 @@ function useEngine() {
   }, []);
 
   useEffect(() => {
-    if (!state || state.error || !state.port) return;
+    if (state?.error) setHealthy(false); // engine crashed or failed: show the splash with details
+    if (!state || state.error || !state.port || !state.ready) return;
     configureEngine(state);
     setHealthy(false);
     let cancelled = false;

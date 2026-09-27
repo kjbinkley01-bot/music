@@ -99,6 +99,20 @@ def transcode_to_mp3(src: Path, dst: Path, bitrate: int = 320) -> Path:
     return dst
 
 
+def needs_transcode(path: Path) -> bool:
+    """Apple Lossless inside .m4a (common for iTunes/CD rips) can't be decoded by Chromium."""
+    if path.suffix.lower() not in (".m4a", ".mp4"):
+        return False
+    try:
+        import mutagen
+
+        f = mutagen.File(str(path))
+        codec = str(getattr(getattr(f, "info", None), "codec", "")).lower()
+        return codec.startswith("alac")
+    except Exception:
+        return False
+
+
 def read_metadata(path: str | Path) -> dict:
     """Title/artist/album/duration using mutagen, falling back to the file name."""
     path = Path(path)

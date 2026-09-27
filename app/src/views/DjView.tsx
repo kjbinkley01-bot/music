@@ -356,6 +356,14 @@ export function DjView() {
   useSubscribe(a);
   useSubscribe(b);
   useDjKeys(view === 'dj');
+  // Keep loaded decks in step with library edits (BPM/grid fixes affect sync and loops).
+  const tracks = useApp((s) => s.tracks);
+  useEffect(() => {
+    for (const d of [a, b]) {
+      const latest = d.track && tracks.find((t) => t.id === d.track!.id);
+      if (latest && latest !== d.track) d.updateTrack(latest);
+    }
+  }, [tracks, a, b]);
   const [zoom, setZoom] = useState(1);
 
   // Harmonic hints are based on whatever is loaded (playing decks first).

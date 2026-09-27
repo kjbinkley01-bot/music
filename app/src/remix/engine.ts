@@ -506,7 +506,8 @@ class RemixEngine {
   private project: RemixProject | null = null;
   private tracks: Track[] = [];
   private drums = new Map<string, AudioBuffer>();
-  private started: AudioScheduledSourceNode[] = [];
+  /** Every scheduled node that hasn't finished yet, so stop() can silence them all. */
+  private live = new Set<AudioScheduledSourceNode>();
   private cycles: Cycle[] = [];
   private scheduledTo = 0;
   private timer: number | null = null;
@@ -592,8 +593,13 @@ class RemixEngine {
       const horizonBeat = cyc.beatStart + (horizon - cyc.ctxStart) / spb;
       const w1 = Math.min(horizonBeat, cyc.beatEnd);
       if (w1 > this.scheduledTo) {
-        scheduleWindow(this.graph(), p, cyc, this.scheduledTo, w1, this.lookupSource, this.lookupDrum, this.started);
-        if (this.metronome) scheduleClicks(this.graph(), p, cyc, this.scheduledTo, w1, this.started);
+        const fresh: AudioScheduledSourceNode[] = [];
+        scheduleWindow(this.graph(), p, cyc, this.scheduledTo, w1, this.lookupSource, this.lookupDrum, fresh);
+        if (this.metronome) scheduleClicks(this.graph(), p, cyc, this.scheduledTo, w1, fresh);
+        for (const n of fresh) {
+          this.live.add(n);
+          n.onended = () => this.live.delete(n);
+        }
         this.scheduledTo = w1;
       }
       if (horizonBeat < cyc.beatEnd) break;
@@ -611,19 +617,19 @@ class RemixEngine {
         break;
       }
     }
-    if (this.started.length > 2000) this.started = this.started.slice(-1000);
   }
 
   private silence() {
     const now = audioContext().currentTime;
-    for (const s of this.started) {
+    for (const s of this.live) {
+      s.onended = null;
       try {
         s.stop(now + 0.01);
       } catch {
         /* never started or already stopped */
       }
     }
-    this.started = [];
+    this.live.clear();
   }
 
   stop() {

@@ -128,6 +128,9 @@ export async function initMidi() {
   }
 }
 
+/** Exposed for unit tests only. */
+export const __test = { handle };
+
 export function exportMappings(): string {
   return JSON.stringify({ app: 'StemDeck', version: 1, mappings: useMidi.getState().mappings }, null, 2);
 }

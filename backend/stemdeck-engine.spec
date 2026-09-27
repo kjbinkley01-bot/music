@@ -22,5 +22,7 @@ a = Analysis(
     excludes=["tkinter", "matplotlib", "IPython", "pytest"],
 )
 pyz = PYZ(a.pure)
-exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="stemdeck-engine", console=False)
+# console=True: a windowed build gets sys.stdout = None and crashes on the first log line.
+# Electron starts it with windowsHide, so no console window is ever shown.
+exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name="stemdeck-engine", console=True)
 coll = COLLECT(exe, a.binaries, a.datas, name="stemdeck-engine")

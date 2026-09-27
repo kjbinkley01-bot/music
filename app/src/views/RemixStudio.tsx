@@ -920,9 +920,15 @@ export function RemixStudio() {
   useEffect(() => {
     if (view !== 'remix') return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.target as HTMLElement).closest('input, select, textarea')) return;
       const s = useRemix.getState();
       const mod = e.ctrlKey || e.metaKey;
+      if (mod && e.code === 'KeyS') {
+        // Save works even while typing in a field (e.g. the project name)
+        e.preventDefault();
+        void s.save();
+        return;
+      }
+      if ((e.target as HTMLElement).closest('input, select, textarea')) return;
       if (e.code === 'Space') {
         e.preventDefault();
         if (remixEngine.playing) remixEngine.stop();
@@ -934,9 +940,6 @@ export function RemixStudio() {
       } else if (mod && e.code === 'KeyY') {
         e.preventDefault();
         s.redo();
-      } else if (mod && e.code === 'KeyS') {
-        e.preventDefault();
-        void s.save();
       } else if (mod && e.code === 'KeyC') {
         const f = findClip(s.project, s.selectedClip);
         if (f) s.set({ clipboard: structuredClone(f.clip) });

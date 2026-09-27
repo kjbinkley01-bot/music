@@ -34,6 +34,7 @@ for _d in (DATA_DIR, STEMS_DIR, CACHE_DIR, SAMPLES_DIR, MODELS_DIR):
 
 # Demucs downloads its weights through torch.hub; keep them inside our data folder.
 os.environ.setdefault("TORCH_HOME", str(MODELS_DIR))
+os.environ.setdefault("HF_HOME", str(MODELS_DIR / "huggingface"))  # newer Demucs releases fetch from HF
 
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".aif", ".aiff", ".m4a", ".aac", ".ogg", ".opus", ".wma"}
 STEM_NAMES = ("vocals", "drums", "bass", "other")
