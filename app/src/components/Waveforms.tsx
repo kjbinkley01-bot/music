@@ -49,7 +49,7 @@ function drawGrid(ctx: CanvasRenderingContext2D, deck: Deck, t0: number, t1: num
     const bar = ((b % 4) + 4) % 4 === 0;
     ctx.fillStyle = bar ? `rgba(255,255,255,${0.32 * alpha})` : `rgba(255,255,255,${0.1 * alpha})`;
     ctx.fillRect(x, 0, 1, h);
-    if (bar && beatPx * 4 > 34) {
+    if (bar && b >= 0 && beatPx * 4 > 34) {
       ctx.fillStyle = `rgba(255,255,255,${0.45 * alpha})`;
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillText(String(Math.floor(b / 4) + 1), x + 3, 10);
@@ -272,8 +272,38 @@ function withAlpha(color: string, a: number) {
 
 // ---- DJ: scrolling waveform centred on the playhead -----------------------------------------
 
+const TILE_PX = 2048; // width of one cached waveform tile
+const CACHE_PX_PER_SEC = 200; // cache resolution; the visible window is scaled from it
+
+interface WaveCache {
+  key: string;
+  tiles: (HTMLCanvasElement | null)[];
+  height: number; // device pixels
+}
+
+/** Render one tile of the (stem-layered) waveform into an offscreen canvas. */
+function renderTile(deck: Deck, index: number, hDev: number, accent: string): HTMLCanvasElement {
+  const c = document.createElement('canvas');
+  c.width = TILE_PX;
+  c.height = hDev;
+  const ctx = c.getContext('2d')!;
+  const t0 = (index * TILE_PX) / CACHE_PX_PER_SEC;
+  const t1 = ((index + 1) * TILE_PX) / CACHE_PX_PER_SEC;
+  const mid = hDev / 2;
+  if (deck.sources.length > 1) {
+    for (const name of ['bass', 'drums', 'other', 'vocals']) {
+      const src = deck.sources.find((x) => x.name === name);
+      if (src) drawPeaks(ctx, src.peaks, t0, t1, 0, TILE_PX, mid, mid - 3, withAlpha(stemColor(name, deck), 0.78));
+    }
+  } else {
+    drawPeaks(ctx, deck.overview, t0, t1, 0, TILE_PX, mid, mid - 3, withAlpha(accent, 0.85));
+  }
+  return c;
+}
+
 export function ScrollingWaveform({ deck, accent, zoom = 1 }: { deck: Deck; accent: string; zoom?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const cache = useRef<WaveCache | null>(null);
   const drag = useRef<{ x: number; pos: number; wasPlaying: boolean } | null>(null);
   useSubscribe(deck);
   useRaf(() => {
@@ -302,16 +332,26 @@ export function ScrollingWaveform({ deck, accent, zoom = 1 }: { deck: Deck; acce
       ctx.fillRect(x0, 0, x1 - x0, h);
     }
     drawGrid(ctx, deck, t0, t1, w, h, 0.9);
-    const mid = h / 2;
-    if (deck.sources.length > 1) {
-      // Layered stems: low-end stems at the back, vocals on top.
-      for (const name of ['bass', 'drums', 'other', 'vocals']) {
-        const s = deck.sources.find((x) => x.name === name);
-        if (s) drawPeaks(ctx, s.peaks, t0, t1, 0, w, mid, mid - 3, withAlpha(stemColor(name, deck), 0.78));
-      }
-    } else {
-      drawPeaks(ctx, deck.overview, t0, t1, 0, w, mid, mid - 3, withAlpha(accent, 0.85));
+
+    // Waveform from cached tiles (re-rendered only when the track or stem mutes change).
+    const hDev = Math.round(h * dpr);
+    const key = `${deck.track?.id}|${deck.sources.map((x) => x.name).join()}|${deck.soloStem}|${JSON.stringify(deck.stemMute)}|${hDev}|${accent}`;
+    if (!cache.current || cache.current.key !== key) {
+      cache.current = { key, tiles: new Array(Math.ceil((deck.duration * CACHE_PX_PER_SEC) / TILE_PX)).fill(null), height: hDev };
     }
+    const wc = cache.current;
+    const pxPerSec = w / span;
+    const first = Math.max(0, Math.floor((t0 * CACHE_PX_PER_SEC) / TILE_PX));
+    const last = Math.min(wc.tiles.length - 1, Math.floor((t1 * CACHE_PX_PER_SEC) / TILE_PX));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    for (let i = first; i <= last; i++) {
+      const tile = (wc.tiles[i] ??= renderTile(deck, i, hDev, accent));
+      const tileStart = (i * TILE_PX) / CACHE_PX_PER_SEC;
+      const dx = (tileStart - t0) * pxPerSec * dpr;
+      ctx.drawImage(tile, 0, 0, TILE_PX, hDev, dx, 0, (TILE_PX / CACHE_PX_PER_SEC) * pxPerSec * dpr, hDev);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
     for (const c of deck.cues) {
       if (c.time < t0 || c.time > t1) continue;
       const x = ((c.time - t0) / span) * w;

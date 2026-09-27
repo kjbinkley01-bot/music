@@ -686,7 +686,3 @@ export async function renderProject(
   scheduleWindow(g, p, cycle, range.start, range.end, lookup, (ref) => drums.get(ref), []);
   return ctx.startRendering();
 }
-
-export function clipsOverlapping(p: RemixProject, beat: number): Clip[] {
-  return p.tracks.flatMap((t) => t.clips.filter((c) => c.start <= beat && clipEnd(c) > beat));
-}

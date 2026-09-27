@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, browserEngineFromUrl, configureEngine } from './api';
-import { Modal, Toasts } from './components/Controls';
+import { Modal, Toasts, ViewVisible } from './components/Controls';
 import { IconCloud, IconDisc, IconGear, IconMidi, IconSliders, IconWave } from './components/Icons';
 import { useDj } from './dj/engine';
 import { initMidi } from './midi/midi';
@@ -262,15 +262,17 @@ export function App() {
       </header>
       <main className="main">
         {/* Views stay mounted so decks, timelines and players keep their state when you switch. */}
-        <div style={{ display: view === 'lab' ? 'block' : 'none', height: '100%' }}>
-          <StemLab />
-        </div>
-        <div style={{ display: view === 'remix' ? 'block' : 'none', height: '100%' }}>
-          <RemixStudio />
-        </div>
-        <div style={{ display: view === 'dj' ? 'block' : 'none', height: '100%' }}>
-          <DjView />
-        </div>
+        {(
+          [
+            ['lab', <StemLab key="lab" />],
+            ['remix', <RemixStudio key="remix" />],
+            ['dj', <DjView key="dj" />],
+          ] as const
+        ).map(([id, el]) => (
+          <div key={id} style={{ display: view === id ? 'block' : 'none', height: '100%' }}>
+            <ViewVisible.Provider value={view === id}>{el}</ViewVisible.Provider>
+          </div>
+        ))}
         {view === 'midi' && <MidiView />}
         {view === 'soundcloud' && <SoundCloudView />}
         {view === 'settings' && <SettingsView />}

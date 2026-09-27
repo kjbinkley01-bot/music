@@ -144,6 +144,19 @@ def refine_tempo(onset_env: np.ndarray, frame_rate: float, coarse_bpm: float, ph
     return bpm, first_beat
 
 
+def warm_up() -> None:
+    """Run the analysis pipeline once on a synthetic beat so numba compiles librosa's kernels."""
+    import librosa
+
+    sr = ANALYSIS_SR
+    t = np.arange(sr * 4) / sr
+    y = (np.sin(2 * np.pi * 220 * t) * 0.2 + (np.mod(t, 0.5) < 0.02) * 0.8).astype(np.float32)
+    env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=HOP)
+    librosa.feature.tempo(onset_envelope=env, sr=sr, hop_length=HOP)
+    librosa.onset.onset_strength(y=y, sr=sr, hop_length=FINE_HOP, n_mels=24, fmax=180)
+    detect_key(y, sr)
+
+
 def analyze(path: str) -> dict:
     import librosa
 

@@ -60,12 +60,20 @@ export async function decodeBytes(bytes: ArrayBuffer): Promise<AudioBuffer> {
   return decode(bytes);
 }
 
-/** Float32 -> Int16 copy (halves memory inside the deck worklet). */
-export function toInt16(data: Float32Array): Int16Array {
+/**
+ * Float32 -> Int16 copy (halves memory inside the deck worklet). Converts in ~4 ms slices and
+ * yields between them, so loading a track never freezes waveforms or controls mid-set.
+ */
+export async function toInt16(data: Float32Array): Promise<Int16Array> {
   const out = new Int16Array(data.length);
-  for (let i = 0; i < data.length; i++) {
-    const v = data[i];
-    out[i] = v <= -1 ? -32768 : v >= 1 ? 32767 : v * 32767;
+  const SLICE = 1 << 20;
+  for (let start = 0; start < data.length; start += SLICE) {
+    const end = Math.min(data.length, start + SLICE);
+    for (let i = start; i < end; i++) {
+      const v = data[i];
+      out[i] = v <= -1 ? -32768 : v >= 1 ? 32767 : v * 32767;
+    }
+    if (end < data.length) await new Promise((r) => setTimeout(r, 0));
   }
   return out;
 }

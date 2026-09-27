@@ -11,6 +11,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 from functools import lru_cache
 from pathlib import Path
 
@@ -68,6 +69,46 @@ def stretch_array(audio: np.ndarray, sr: int, tempo_ratio: float = 1.0, semitone
     return np.stack([c[:n] for c in channels], axis=1).astype(np.float32)
 
 
+_pool = None
+_pool_lock = threading.Lock()
+
+
+def _render(source: str, out: str, tempo_ratio: float, semitones: float) -> None:
+    from .audio_io import decode
+
+    audio = decode(source, sr=44100, channels=2)
+    result = stretch_array(audio, 44100, tempo_ratio, semitones)
+    tmp = Path(out).with_suffix(".tmp.flac")
+    sf.write(str(tmp), np.clip(result, -1, 1), 44100, subtype="PCM_16", format="FLAC")
+    tmp.replace(out)
+
+
+def _executor():
+    """Two worker processes (so a few clips stretch in parallel), recycled every 16 renders so
+    librosa/numpy memory is returned to the system. Keeps heavy DSP out of the API process."""
+    global _pool
+    with _pool_lock:
+        if _pool is None:
+            import multiprocessing as mp
+            from concurrent.futures import ProcessPoolExecutor
+
+            from .procutil import exit_with_parent
+
+            extra = {"max_tasks_per_child": 16} if sys.version_info >= (3, 11) else {}
+            _pool = ProcessPoolExecutor(max_workers=2, mp_context=mp.get_context("spawn"), initializer=exit_with_parent, **extra)
+        return _pool
+
+
+def shutdown() -> None:
+    global _pool
+    with _pool_lock:
+        if _pool is not None:
+            for proc in list((getattr(_pool, "_processes", None) or {}).values()):
+                proc.terminate()
+            _pool.shutdown(wait=False, cancel_futures=True)
+            _pool = None
+
+
 def stretched_file(source: Path, tempo_ratio: float, semitones: float) -> Path:
     """Stretch a file once and cache the result (keyed by path, mtime and parameters)."""
     tempo_ratio = round(float(tempo_ratio), 5)
@@ -79,12 +120,6 @@ def stretched_file(source: Path, tempo_ratio: float, semitones: float) -> Path:
     out = CACHE_DIR / "stretch" / f"{key}.flac"
     if out.exists():
         return out
-    from .audio_io import decode
-
-    audio = decode(source, sr=44100, channels=2)
-    result = stretch_array(audio, 44100, tempo_ratio, semitones)
     out.parent.mkdir(parents=True, exist_ok=True)
-    tmp = out.with_suffix(".tmp.flac")
-    sf.write(str(tmp), np.clip(result, -1, 1), 44100, subtype="PCM_16", format="FLAC")
-    tmp.replace(out)
+    _executor().submit(_render, str(source), str(out), tempo_ratio, semitones).result()
     return out

@@ -33,6 +33,7 @@ interface AppState {
 }
 
 let toastId = 0;
+let lastJobsKey = '';
 
 export const useApp = create<AppState>((set, get) => ({
   view: 'lab',
@@ -62,8 +63,15 @@ export const useApp = create<AppState>((set, get) => ({
   },
   poll: async () => {
     const status = await api.status();
-    const changed = status.revision !== get().revision;
-    set({ jobs: status.jobs, recording: status.recording, revision: status.revision });
+    const s = get();
+    const changed = status.revision !== s.revision;
+    // Only publish job updates when something actually changed: every subscriber (the whole
+    // library table) would otherwise re-render once a second while idle.
+    const jobsKey = JSON.stringify(status.jobs);
+    if (jobsKey !== lastJobsKey || status.recording !== s.recording || changed) {
+      lastJobsKey = jobsKey;
+      set({ jobs: status.jobs, recording: status.recording, revision: status.revision });
+    }
     if (changed) await get().refreshTracks();
   },
   toast: (text, kind = 'info', action) => {

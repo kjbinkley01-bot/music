@@ -5,7 +5,9 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Body, FastAPI, HTTPException, Query, Request
@@ -22,11 +24,32 @@ from .jobs import jobs
 from .keys import camelot, key_name
 from .soundcloud import SoundCloudError, add_to_wishlist, soundcloud
 from .stretch import engine_name, stretched_file
+from .stretch import shutdown as stretch_shutdown
 
 TOKEN = os.environ.get("STEMDECK_TOKEN", "")
 OPEN_PATHS = {"/health", "/soundcloud/callback"}
 
-app = FastAPI(title="StemDeck engine", version=__version__)
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    jobs.start()
+    # Warm up in the background: device probe and librosa's JIT in the analysis worker, so the
+    # first import gets BPM/key quickly and /health answers instantly.
+    threading.Thread(target=_warm_up, name="warm-up", daemon=True).start()
+    yield
+    jobs.stop()
+    recorder.stop()
+    stretch_shutdown()
+
+
+def _warm_up() -> None:
+    from .separation import device_info
+
+    time.sleep(1.5)
+    device_info()
+    jobs.warm_up()
+
+
+app = FastAPI(title="StemDeck engine", version=__version__, lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 
@@ -37,17 +60,6 @@ async def require_token(request: Request, call_next):
         if supplied != TOKEN:
             return JSONResponse({"detail": "Invalid token"}, status_code=401)
     return await call_next(request)
-
-
-@app.on_event("startup")
-def _startup() -> None:
-    jobs.start()
-
-
-@app.on_event("shutdown")
-def _shutdown() -> None:
-    jobs.stop()
-    recorder.stop()
 
 
 # ---- helpers -------------------------------------------------------------------

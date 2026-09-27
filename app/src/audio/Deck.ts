@@ -1,5 +1,6 @@
 import { api } from '../api';
 import { clamp } from '../music';
+import { filterFreqs } from '../remix/model';
 import type { Cue, StemName, Track } from '../types';
 import { audioContext, ensureAudio } from './context';
 import { type LoadedSource, sumPeaks, toInt16 } from './loader';
@@ -145,18 +146,23 @@ export class Deck {
 
   // ---- loading ----------------------------------------------------------------
 
+  private loadSeq = 0;
+
   async load(track: Track, sources: LoadedSource[]) {
+    const seq = ++this.loadSeq;
     const node = await this.ensureNode();
     const sr = audioContext().sampleRate;
     const length = Math.max(...sources.map((s) => s.buffer.length));
     const transfer: Transferable[] = [];
-    const stems = sources.map((s) => {
-      const l = toInt16(s.buffer.getChannelData(0));
-      const r = s.buffer.numberOfChannels > 1 ? toInt16(s.buffer.getChannelData(1)) : l;
+    const stems: { l: Int16Array; r: Int16Array }[] = [];
+    for (const s of sources) {
+      const l = await toInt16(s.buffer.getChannelData(0));
+      const r = s.buffer.numberOfChannels > 1 ? await toInt16(s.buffer.getChannelData(1)) : l;
       transfer.push(l.buffer);
       if (r !== l) transfer.push(r.buffer);
-      return { l, r };
-    });
+      stems.push({ l, r });
+    }
+    if (seq !== this.loadSeq) return; // a newer load started while we were converting
     this.track = track;
     this.sources = sources;
     this.overview = sources.length === 1 ? sources[0].peaks : sumPeaks(sources.map((s) => s.peaks));
@@ -480,14 +486,9 @@ export class Deck {
   setFilter(v: number) {
     this.filter = clamp(v, -1, 1);
     const t = audioContext().currentTime;
-    const f = this.filter;
-    const dead = 0.04;
-    // Exponential sweep: 20 kHz -> 150 Hz for low pass, 10 Hz -> 6 kHz for high pass.
-    const lpFreq = f < -dead ? 20000 * Math.pow(150 / 20000, (-f - dead) / (1 - dead)) : 22000;
-    const hpFreq = f > dead ? 10 * Math.pow(6000 / 10, (f - dead) / (1 - dead)) : 10;
+    const [lpFreq, hpFreq, q] = filterFreqs(this.filter);
     this.lp.frequency.setTargetAtTime(lpFreq, t, 0.02);
     this.hp.frequency.setTargetAtTime(hpFreq, t, 0.02);
-    const q = Math.abs(f) > dead ? 1.2 : 0.707;
     this.lp.Q.setTargetAtTime(q, t, 0.02);
     this.hp.Q.setTargetAtTime(q, t, 0.02);
     this.emit();

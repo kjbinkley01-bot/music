@@ -1,12 +1,12 @@
 import { memo, useEffect, useRef, useState } from 'react';
 import { Knob, useRaf } from '../components/Controls';
 import { drawPeaks } from '../components/Waveforms';
-import { keyCompatibility, semitonesToMatch, shiftKey, trackKey } from '../music';
-import { trackById, useApp } from '../store/app';
+import { type Key, keyCompatibility, semitonesToMatch, shiftKey, trackKey } from '../music';
+import { trackById } from '../store/app';
 import { STEM_COLOR, STEM_LABEL, type StemName, type Track } from '../types';
 import { TRACK_MIME } from '../views/LibraryTable';
 import { clipSourceKey, getLoadedSource, remixEngine, sourceBpm, useSources } from './engine';
-import { type AudioClip, type AutoPoint, type Clip, type RemixProject, type RemixTrack, type SourceStem, clipEnd, newTrack, projectLength, uid } from './model';
+import { type AudioClip, type AutoPoint, type Clip, type DrumPattern, type RemixProject, type RemixTrack, type SourceStem, clipEnd, newTrack, projectLength, uid } from './model';
 import { snapBeat, useRemix } from './store';
 
 export const STEM_MIME = 'application/x-stemdeck-stem';
@@ -26,12 +26,13 @@ export function makeAudioClip(track: Track, stem: SourceStem, beat: number, proj
 
 // ---- clip views ---------------------------------------------------------------------------
 
-const ClipBody = memo(function ClipBody({ clip, project, width, height, color }: { clip: Clip; project: RemixProject; width: number; height: number; color: string }) {
+const ClipBody = memo(function ClipBody({ clip, bpm, pattern, width, height, color }: { clip: Clip; bpm: number; pattern?: DrumPattern; width: number; height: number; color: string }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const version = useSources((s) => s.version);
   const track = clip.type === 'audio' ? trackById(clip.trackId) : undefined;
-  const srcKey = clip.type === 'audio' ? clipSourceKey(clip, track, project.bpm) : '';
-  const pattern = clip.type === 'pattern' ? project.patterns.find((p) => p.id === clip.patternId) : undefined;
+  const srcKey = clip.type === 'audio' ? clipSourceKey(clip, track, bpm) : '';
+  // Only redraw when this clip's own source finishes loading, not on every source load.
+  const ready = clip.type === 'audio' ? !!getLoadedSource(srcKey) : true;
 
   useEffect(() => {
     const el = ref.current;
@@ -42,7 +43,7 @@ const ClipBody = memo(function ClipBody({ clip, project, width, height, color }:
     el.height = h;
     const ctx = el.getContext('2d')!;
     ctx.clearRect(0, 0, w, h);
-    const spb = 60 / project.bpm;
+    const spb = 60 / bpm;
     if (clip.type === 'audio') {
       const src = getLoadedSource(srcKey);
       if (!src) return;
@@ -87,37 +88,50 @@ const ClipBody = memo(function ClipBody({ clip, project, width, height, color }:
       }
       ctx.fill();
     }
-  }, [clip, width, height, color, version, srcKey, pattern, project.bpm]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clip, width, height, color, ready, srcKey, pattern, bpm]);
+  void version; // subscribing to source loads makes `ready` update
 
   return <canvas ref={ref} style={{ position: 'absolute', inset: '16px 0 0 0', width: '100%', height: 'calc(100% - 16px)', pointerEvents: 'none' }} />;
 });
 
-function clipLabel(clip: Clip, project: RemixProject): string {
+function clipLabel(clip: Clip, pattern?: DrumPattern): string {
   if (clip.type === 'audio') {
     const t = trackById(clip.trackId);
     const stem = clip.stem === 'original' ? 'Full mix' : STEM_LABEL[clip.stem as StemName];
     return `${stem} · ${t?.title ?? 'missing track'}${clip.semitones ? ` (${clip.semitones > 0 ? '+' : ''}${clip.semitones})` : ''}`;
   }
-  if (clip.type === 'pattern') return project.patterns.find((p) => p.id === clip.patternId)?.name ?? 'Pattern';
+  if (clip.type === 'pattern') return pattern?.name ?? 'Pattern';
   return clip.variant === 'riser' ? 'Riser' : clip.variant === 'downlifter' ? 'Downlifter' : 'Impact';
 }
 
-function clipColor(clip: Clip, track: RemixTrack) {
+function clipColor(clip: Clip, trackColor: string) {
   if (clip.type === 'audio') return STEM_COLOR[clip.stem];
-  return track.color;
+  return trackColor;
 }
 
 type DragMode = 'move' | 'left' | 'right';
 
-function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Clip; track: RemixTrack; trackIndex: number; project: RemixProject; zoom: number; height: number }) {
+interface ClipViewProps {
+  clip: Clip;
+  trackId: string;
+  trackColor: string;
+  trackIndex: number;
+  zoom: number;
+  height: number;
+  bpm: number;
+  projectKey: Key | null;
+  pattern?: DrumPattern;
+}
+
+const ClipView = memo(function ClipView({ clip, trackId, trackColor, trackIndex, zoom, height, bpm, projectKey, pattern }: ClipViewProps) {
   const selected = useRemix((s) => s.selectedClip === clip.id);
   const loading = useSources((s) => s.loading);
   const drag = useRef<{ mode: DragMode; x: number; y: number; orig: Clip; trackIndex: number; copied: boolean } | null>(null);
-  const color = clipColor(clip, track);
+  const color = clipColor(clip, trackColor);
   const lib = clip.type === 'audio' ? trackById(clip.trackId) : undefined;
-  const srcReady = clip.type !== 'audio' || !!getLoadedSource(clipSourceKey(clip, lib, project.bpm));
-  const clash =
-    clip.type === 'audio' && project.key && lib ? keyCompatibility(shiftKey(trackKey(lib), clip.semitones), project.key) === 'clash' : false;
+  const srcReady = clip.type !== 'audio' || !!getLoadedSource(clipSourceKey(clip, lib, bpm));
+  const clash = clip.type === 'audio' && projectKey && lib ? keyCompatibility(shiftKey(trackKey(lib), clip.semitones), projectKey) === 'clash' : false;
   const width = clip.length * zoom;
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -128,7 +142,7 @@ function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Cl
     const x = e.clientX - rect.left;
     const mode: DragMode = x < 7 ? 'left' : x > rect.width - 7 ? 'right' : 'move';
     const store = useRemix.getState();
-    store.select(clip.id, track.id);
+    store.select(clip.id, trackId);
     store.checkpoint();
     drag.current = { mode, x: e.clientX, y: e.clientY, orig: structuredClone(clip), trackIndex, copied: false };
   };
@@ -220,10 +234,10 @@ function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Cl
       <div className="ellipsis" style={{ fontSize: 10.5, fontWeight: 700, padding: '2px 6px', color: '#fff', textShadow: '0 1px 2px #000', pointerEvents: 'none', position: 'relative', zIndex: 1 }}>
         {clash && <span style={{ color: 'var(--bad)' }}>⚠ </span>}
         {clip.type === 'audio' && clip.loopLen ? '⟲ ' : ''}
-        {clipLabel(clip, project)}
+        {clipLabel(clip, pattern)}
         {!srcReady && (loading ? ' · stretching…' : ' · unavailable')}
       </div>
-      <ClipBody clip={clip} project={project} width={width} height={height - 6} color={color} />
+      <ClipBody clip={clip} bpm={bpm} pattern={pattern} width={width} height={height - 6} color={color} />
       {(clip.fadeIn || clip.fadeOut) && clip.type !== 'pattern' ? (
         <svg width={width} height={height - 6} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
           <polyline
@@ -238,11 +252,11 @@ function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Cl
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} />
     </div>
   );
-}
+});
 
 // ---- automation lane ------------------------------------------------------------------------
 
-function AutomationLane({ track, index, zoom, width }: { track: RemixTrack; index: number; zoom: number; width: number }) {
+const AutomationLane = memo(function AutomationLane({ track, index, zoom, width }: { track: RemixTrack; index: number; zoom: number; width: number }) {
   const drag = useRef<number | null>(null);
   const ref = useRef<SVGSVGElement>(null);
   const param = track.autoParam ?? 'filter';
@@ -327,11 +341,11 @@ function AutomationLane({ track, index, zoom, width }: { track: RemixTrack; inde
       ))}
     </svg>
   );
-}
+});
 
 // ---- track header -------------------------------------------------------------------------------
 
-function TrackHeader({ track, index, height }: { track: RemixTrack; index: number; height: number }) {
+const TrackHeader = memo(function TrackHeader({ track, index, height }: { track: RemixTrack; index: number; height: number }) {
   const edit = useRemix((s) => s.edit);
   const selected = useRemix((s) => s.selectedTrack === track.id);
   const set = (fn: (t: RemixTrack) => void, structural = false) => edit((p) => fn(p.tracks[index]), { structural });
@@ -387,7 +401,7 @@ function TrackHeader({ track, index, height }: { track: RemixTrack; index: numbe
       </div>
     </div>
   );
-}
+});
 
 // ---- timeline -------------------------------------------------------------------------------------
 
@@ -573,7 +587,18 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
                   onDoubleClick={(e) => laneDoubleClick(e, t, i)}
                 >
                   {t.clips.map((c) => (
-                    <ClipView key={c.id} clip={c} track={t} trackIndex={i} project={project} zoom={zoom} height={h} />
+                    <ClipView
+                      key={c.id}
+                      clip={c}
+                      trackId={t.id}
+                      trackColor={t.color}
+                      trackIndex={i}
+                      zoom={zoom}
+                      height={h}
+                      bpm={project.bpm}
+                      projectKey={project.key}
+                      pattern={c.type === 'pattern' ? project.patterns.find((x) => x.id === c.patternId) : undefined}
+                    />
                   ))}
                   {t.clips.length === 0 && (
                     <div className="faint" style={{ position: 'absolute', left: 12, top: h / 2 - 8, fontSize: 11, pointerEvents: 'none' }}>
@@ -640,8 +665,4 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
       </div>
     </div>
   );
-}
-
-export function useTrackLookup() {
-  return useApp((s) => s.tracks);
 }

@@ -1,3 +1,4 @@
+import { produce } from 'immer';
 import { create } from 'zustand';
 import { api } from '../api';
 import { reportError, useApp } from '../store/app';
@@ -49,8 +50,15 @@ export const useRemix = create<RemixState>((set, get) => {
     edit: (fn, opts = {}) => {
       const { structural = true, history = true } = opts;
       const prev = get().project;
-      const next = structuredClone(prev);
-      fn(next);
+      // Structural sharing: untouched tracks and clips keep their identity, so memoised clip
+      // views (and their waveform canvases) only re-render when their own data changes.
+      const next = produce(prev, (draft) => {
+        fn(draft); // never return the recipe's value: many edits are one-line assignments
+      });
+      if (next === prev) {
+        if (structural) remixEngine.update(prev, useApp.getState().tracks, true);
+        return;
+      }
       set({
         project: next,
         dirty: true,

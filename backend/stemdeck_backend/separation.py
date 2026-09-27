@@ -9,6 +9,7 @@ from __future__ import annotations
 import multiprocessing as mp
 import os
 import queue as queue_mod
+import threading
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,17 +44,39 @@ def pick_device(use_gpu: bool) -> str:
     return "cpu"
 
 
-def device_info() -> dict:
+def _probe_device(q: mp.Queue) -> None:
     try:
         import torch
     except ImportError:
-        return {"torch": False, "cuda": False, "device": "unavailable"}
+        q.put({"torch": False, "cuda": False, "device": "unavailable"})
+        return
     cuda = bool(torch.cuda.is_available())
-    return {
-        "torch": True,
-        "cuda": cuda,
-        "device": torch.cuda.get_device_name(0) if cuda else "CPU",
-    }
+    q.put({"torch": True, "cuda": cuda, "device": torch.cuda.get_device_name(0) if cuda else "CPU"})
+
+
+_device: dict | None = None
+_device_lock = threading.Lock()
+
+
+def device_info() -> dict:
+    """CPU/GPU capabilities, probed once in a throwaway process.
+
+    Importing torch costs ~200 MB and a second or more; doing it in a child keeps the API
+    process small (the separation child imports torch itself when it runs).
+    """
+    global _device
+    with _device_lock:
+        if _device is None:
+            ctx = mp.get_context("spawn")
+            q: mp.Queue = ctx.Queue()
+            proc = ctx.Process(target=_probe_device, args=(q,), daemon=True)
+            proc.start()
+            try:
+                _device = q.get(timeout=120)
+            except queue_mod.Empty:
+                _device = {"torch": False, "cuda": False, "device": "unavailable"}
+            proc.join(timeout=5)
+        return dict(_device)
 
 
 def run_separation(req: SeparationRequest, report: Callable[[float, str], None]) -> dict[str, str]:

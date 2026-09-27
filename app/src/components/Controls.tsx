@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { clamp } from '../music';
 import { useApp } from '../store/app';
 
@@ -210,10 +210,15 @@ export function useSubscribe(obj: { subscribe(fn: () => void): () => void } | nu
   );
 }
 
-/** requestAnimationFrame loop that runs while `active`. */
+/** False inside a section that is mounted but hidden (so its animations can stop). */
+export const ViewVisible = createContext(true);
+
+/** requestAnimationFrame loop that runs while `active` and its section is on screen. */
 export function useRaf(fn: () => void, active = true) {
   const ref = useRef(fn);
   ref.current = fn;
+  const visible = useContext(ViewVisible);
+  active = active && visible;
   useEffect(() => {
     if (!active) return;
     let id = 0;

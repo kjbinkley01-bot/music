@@ -1,4 +1,4 @@
-import { type ReactNode, memo, useMemo, useState } from 'react';
+import { type ReactNode, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { Camelot, Modal } from '../components/Controls';
 import { IconSearch } from '../components/Icons';
@@ -76,6 +76,23 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
   const [filter, setFilter] = useState<Filter>('all');
   const [menu, setMenu] = useState<{ x: number; y: number; track: Track } | null>(null);
   const [editing, setEditing] = useState<Track | null>(null);
+  // Row virtualisation: only rows near the viewport are rendered, so libraries with thousands
+  // of tracks scroll smoothly on slow machines.
+  const scroller = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 800 });
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el) return;
+    const update = () => setViewport({ top: el.scrollTop, height: el.clientHeight });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    el.addEventListener('scroll', update, { passive: true });
+    update();
+    return () => {
+      ro.disconnect();
+      el.removeEventListener('scroll', update);
+    };
+  }, []);
 
   const jobByTrack = useMemo(() => {
     const m = new Map<number, Job>();
@@ -141,6 +158,56 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
     }
   };
 
+  const rowH = compact ? 46 : 33;
+  const renderRow = (t: Track) => {
+    const c = compatOf(t, compatWith);
+    return (
+      <tr
+        key={t.id}
+        style={{ height: rowH }}
+        className={`${t.id === selectedId ? 'selected' : ''} ${c ? `compat-${c}` : ''}`}
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(TRACK_MIME, String(t.id));
+          e.dataTransfer.effectAllowed = 'copy';
+        }}
+        onClick={() => onSelect?.(t)}
+        onDoubleClick={() => onOpen?.(t)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          setMenu({ x: e.clientX, y: e.clientY, track: t });
+        }}
+      >
+        <td style={{ maxWidth: compact ? 200 : 280 }}>
+          <div className="ellipsis" title={t.path}>
+            {t.is_remix && <span className="chip warn" style={{ marginRight: 6 }}>Remix</span>}
+            {t.title}
+          </div>
+          {compact && t.artist && (
+            <div className="ellipsis faint" style={{ fontSize: 11 }}>
+              {t.artist}
+            </div>
+          )}
+        </td>
+        {!compact && (
+          <td className="ellipsis muted" style={{ maxWidth: 180 }}>
+            {t.artist}
+          </td>
+        )}
+        <td className="num">{t.analysis_status === 'pending' ? <span className="faint">…</span> : fmtBpm(t.bpm)}</td>
+        <td>
+          <Camelot code={t.camelot} name={compact ? undefined : t.key_name} />
+        </td>
+        {!compact && <td className="num muted">{fmtTime(t.duration)}</td>}
+        {!compact && <td className="num muted">{t.energy ? t.energy.toFixed(0) : '—'}</td>}
+        <td>
+          <StemBadge track={t} job={jobByTrack.get(t.id)} />
+        </td>
+        {extraActions && <td style={{ textAlign: 'right' }}>{extraActions(t)}</td>}
+      </tr>
+    );
+  };
+
   return (
     <div className="col" style={{ height: '100%', gap: 0 }} onClick={() => menu && setMenu(null)}>
       <div className="row" style={{ padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>
@@ -156,7 +223,7 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
           ))}
         </div>
       </div>
-      <div className="panel-body">
+      <div className="panel-body" ref={scroller}>
         {rows.length === 0 ? (
           <div className="empty">
             {tracks.length === 0 ? (
@@ -183,53 +250,17 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
               </tr>
             </thead>
             <tbody>
-              {rows.map((t) => {
-                const c = compatOf(t, compatWith);
+              {(() => {
+                const first = Math.max(0, Math.floor(viewport.top / rowH) - 10);
+                const last = Math.min(rows.length, Math.ceil((viewport.top + viewport.height) / rowH) + 10);
                 return (
-                  <tr
-                    key={t.id}
-                    className={`${t.id === selectedId ? 'selected' : ''} ${c ? `compat-${c}` : ''}`}
-                    draggable
-                    onDragStart={(e) => {
-                      e.dataTransfer.setData(TRACK_MIME, String(t.id));
-                      e.dataTransfer.effectAllowed = 'copy';
-                    }}
-                    onClick={() => onSelect?.(t)}
-                    onDoubleClick={() => onOpen?.(t)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      setMenu({ x: e.clientX, y: e.clientY, track: t });
-                    }}
-                  >
-                    <td style={{ maxWidth: compact ? 200 : 280 }}>
-                      <div className="ellipsis" title={t.path}>
-                        {t.is_remix && <span className="chip warn" style={{ marginRight: 6 }}>Remix</span>}
-                        {t.title}
-                      </div>
-                      {compact && t.artist && (
-                        <div className="ellipsis faint" style={{ fontSize: 11 }}>
-                          {t.artist}
-                        </div>
-                      )}
-                    </td>
-                    {!compact && (
-                      <td className="ellipsis muted" style={{ maxWidth: 180 }}>
-                        {t.artist}
-                      </td>
-                    )}
-                    <td className="num">{t.analysis_status === 'pending' ? <span className="faint">…</span> : fmtBpm(t.bpm)}</td>
-                    <td>
-                      <Camelot code={t.camelot} name={compact ? undefined : t.key_name} />
-                    </td>
-                    {!compact && <td className="num muted">{fmtTime(t.duration)}</td>}
-                    {!compact && <td className="num muted">{t.energy ? t.energy.toFixed(0) : '—'}</td>}
-                    <td>
-                      <StemBadge track={t} job={jobByTrack.get(t.id)} />
-                    </td>
-                    {extraActions && <td style={{ textAlign: 'right' }}>{extraActions(t)}</td>}
-                  </tr>
+                  <>
+                    {first > 0 && <tr style={{ height: first * rowH }} aria-hidden />}
+                    {rows.slice(first, last).map((t) => renderRow(t))}
+                    {last < rows.length && <tr style={{ height: (rows.length - last) * rowH }} aria-hidden />}
+                  </>
                 );
-              })}
+              })()}
             </tbody>
           </table>
         )}

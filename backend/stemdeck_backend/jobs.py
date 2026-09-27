@@ -42,6 +42,18 @@ class JobManager:
             t.start()
             self._threads.append(t)
 
+    def _ensure_pool(self) -> ProcessPoolExecutor:
+        if self._pool is None:
+            self._pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"), initializer=exit_with_parent)
+        return self._pool
+
+    def warm_up(self) -> None:
+        """Start the analysis worker and let librosa compile its JIT kernels on a short tone."""
+        try:
+            self._ensure_pool().submit(analysis.warm_up).result(timeout=300)
+        except Exception:  # noqa: BLE001 - warming up is best effort
+            log.debug("analysis warm-up failed", exc_info=True)
+
     def stop(self) -> None:
         self._stop.set()
         for event in self._wake.values():
@@ -114,9 +126,7 @@ class JobManager:
                 continue
             db.update_job(job["id"], status="running", started_at=time.time(), message="Analysing")
             try:
-                if self._pool is None:
-                    self._pool = ProcessPoolExecutor(max_workers=1, mp_context=mp.get_context("spawn"), initializer=exit_with_parent)
-                result = self._pool.submit(analysis.analyze, track["path"]).result()
+                result = self._ensure_pool().submit(analysis.analyze, track["path"]).result()
                 duration = result.pop("duration")
                 if track["is_remix"] and track["bpm"]:
                     # A rendered remix's tempo and grid are exact (project BPM, beat 1 at 0 s).
