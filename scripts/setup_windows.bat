@@ -1,23 +1,31 @@
 @echo off
-REM StemDeck one-time developer setup for Windows.
-REM Requires: Python 3.11 (python.org, tick "Add to PATH") and Node.js 20 LTS or newer.
+REM StemDeck one-time setup for Windows.
+REM Requires: Python 3.11 (python.org, tick "Add python.exe to PATH") and Node.js 20 LTS or newer.
 setlocal
 cd /d "%~dp0\.."
 
+echo === Checking prerequisites ===
+where node >nul 2>nul || (echo ERROR: Node.js not found. Install the LTS version from https://nodejs.org then run this again. & goto :fail)
+set PY=
+py -3.11 --version >nul 2>nul && set PY=py -3.11
+if not defined PY (python --version >nul 2>nul && set PY=python)
+if not defined PY (echo ERROR: Python not found. Install Python 3.11 from https://www.python.org/downloads/windows/ and tick "Add python.exe to PATH". & goto :fail)
+echo Using %PY%
+%PY% --version
+node --version
+
 echo.
 echo === 1/4  Creating Python environment (backend\.venv) ===
-py -3.11 -m venv backend\.venv 2>nul || python -m venv backend\.venv
-if errorlevel 1 (echo Could not create a Python venv. Is Python 3.11 installed? & exit /b 1)
+if not exist backend\.venv\Scripts\python.exe %PY% -m venv backend\.venv
+if not exist backend\.venv\Scripts\python.exe (echo ERROR: could not create the Python environment. & goto :fail)
 call backend\.venv\Scripts\activate.bat
 python -m pip install --upgrade pip
 
 echo.
-echo === 2/4  Installing PyTorch (CPU build) and audio libraries ===
+echo === 2/4  Installing PyTorch (CPU build) and audio libraries - about 1.5 GB, be patient ===
 REM For an NVIDIA GPU instead, replace the next line with the CUDA command from https://pytorch.org
-pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu
-if errorlevel 1 exit /b 1
-pip install -r backend\requirements-dev.txt
-if errorlevel 1 exit /b 1
+pip install torch torchaudio --index-url https://download.pytorch.org/whl/cpu || goto :fail
+pip install -r backend\requirements-dev.txt || goto :fail
 
 echo.
 echo === 3/4  Downloading Rubber Band (high quality time-stretch, optional) ===
@@ -27,10 +35,19 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
 
 echo.
 echo === 4/4  Installing the desktop app (npm) ===
-cd app
-call npm install
-if errorlevel 1 exit /b 1
+pushd app
+call npm install || (popd & goto :fail)
+popd
 
 echo.
-echo Setup complete. Start StemDeck with:  scripts\run_dev.bat
-endlocal
+echo Setup complete.
+echo   Run the app:        scripts\run_dev.bat
+echo   Build the installer: scripts\build_windows.bat
+pause
+exit /b 0
+
+:fail
+echo.
+echo Setup did not finish - see the message above.
+pause
+exit /b 1
