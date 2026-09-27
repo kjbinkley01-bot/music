@@ -1,0 +1,17 @@
+# Node / Electron
+app/node_modules/
+app/dist/
+app/release/
+
+# Python
+backend/.venv/
+backend/build/
+backend/dist/
+backend/bin/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# OS
+.DS_Store
+Thumbs.db
