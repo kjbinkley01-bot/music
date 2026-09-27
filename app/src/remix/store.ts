@@ -103,6 +103,11 @@ export const useRemix = create<RemixState>((set, get) => {
           set({ projectId: id });
         }
         set({ dirty: false });
+        try {
+          localStorage.removeItem('stemdeck.remix.autosave');
+        } catch {
+          /* ignore */
+        }
         useApp.getState().toast(`Saved “${project.name}”`, 'success');
       } catch (e) {
         reportError(e, 'Save failed');

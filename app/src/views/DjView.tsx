@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Deck } from '../audio/Deck';
 import { Camelot, Fader, Knob, useRaf, useSubscribe } from '../components/Controls';
 import { IconPause, IconPlay, IconRecord, IconSync } from '../components/Icons';
+import { Meter } from '../components/Meter';
 import { CUE_COLORS, Overview, ScrollingWaveform } from '../components/Waveforms';
 import { dj, useDj } from '../dj/engine';
 import { camelotName, fmtBpm, fmtTime, keyName, shiftKey, trackKey } from '../music';
@@ -147,6 +148,12 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
               <button className="btn sm" disabled={!deck.loop} onClick={() => deck.resizeLoop(2)} title="Double loop">
                 ×2
               </button>
+              <button className="btn sm" disabled={!t?.bpm} onClick={(e) => deck.beatJump(e.shiftKey ? -16 : -4)} title="Beat jump back 1 bar (Shift: 4 bars)">
+                ⇤
+              </button>
+              <button className="btn sm" disabled={!t?.bpm} onClick={(e) => deck.beatJump(e.shiftKey ? 16 : 4)} title="Beat jump forward 1 bar (Shift: 4 bars)">
+                ⇥
+              </button>
             </div>
           </div>
           <div>
@@ -194,8 +201,22 @@ function Channel({ deck, accent }: { deck: Deck; accent: string }) {
   );
   return (
     <div className="col" style={{ alignItems: 'center', gap: 6 }}>
-      <div className="mono" style={{ color: accent, fontWeight: 800 }}>
-        {deck.id}
+      <div className="row" style={{ gap: 6 }}>
+        <span className="mono" style={{ color: accent, fontWeight: 800 }}>
+          {deck.id}
+        </span>
+        <Knob
+          size={24}
+          value={deck.gainDb}
+          min={-12}
+          max={12}
+          bipolar
+          defaultValue={0}
+          onChange={(v) => deck.setGain(v)}
+          color="#e9edff"
+          format={(v) => `Gain ${v > 0 ? '+' : ''}${v.toFixed(1)} dB${deck.autoGain && deck.track?.loudness != null ? ' (auto)' : ''}`}
+          title="Channel gain — set automatically from the track's loudness"
+        />
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 6px' }}>
         {eq('high', 'High')}
@@ -203,25 +224,51 @@ function Channel({ deck, accent }: { deck: Deck; accent: string }) {
         {eq('low', 'Low')}
         <Knob size={32} value={deck.filter} min={-1} max={1} bipolar onChange={(v) => deck.setFilter(v)} label="Filter" color="#b98cff" format={(v) => (Math.abs(v) < 0.04 ? 'OFF' : v < 0 ? `LP ${Math.round(-v * 100)}` : `HP ${Math.round(v * 100)}`)} />
       </div>
-      <Fader value={deck.volume} max={1} onChange={(v) => deck.setVolume(v)} length={110} defaultValue={1} title="Channel volume" />
+      <div className="row" style={{ gap: 4, alignItems: 'flex-end' }}>
+        <Fader value={deck.volume} max={1} onChange={(v) => deck.setVolume(v)} length={110} defaultValue={1} title="Channel volume" />
+        <Meter analyser={deck.analyser} height={110} />
+      </div>
     </div>
   );
 }
 
 function Mixer() {
   const engine = dj();
-  const { xfade, curve, recording, recordSeconds, recordPeak, recordFormat, masterVolume } = useDj();
+  const { xfade, curve, recording, recordSeconds, recordPeak, recordFormat, masterVolume, blend, blendBars } = useDj();
   return (
     <div className="glass panel" style={{ padding: 10, alignItems: 'center', gap: 8, width: 250 }}>
       <div className="row" style={{ width: '100%' }}>
         <span className="panel-title grow">Mixer</span>
         <Knob value={masterVolume} min={0} max={1} defaultValue={0.9} onChange={(v) => engine.setMasterVolume(v)} size={26} title="Master volume" format={(v) => `Master ${Math.round(v * 100)}%`} />
       </div>
-      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
+      <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
         <Channel deck={engine.decks[0]} accent={ACCENT[0]} />
+        <div style={{ alignSelf: 'flex-end' }}>
+          <Meter analyser={engine.masterAnalyser} height={110} width={5} />
+        </div>
         <Channel deck={engine.decks[1]} accent={ACCENT[1]} />
       </div>
       <Fader orientation="horizontal" value={xfade} min={-1} max={1} onChange={(v) => engine.setCrossfader(v)} length={180} centerDetent defaultValue={0} title="Crossfader (Shift + ← / →)" />
+      <div className="row" style={{ gap: 4 }} title="Automatic transition: syncs the other deck, crossfades and swaps the bass over the chosen length">
+        <button className={`btn sm ${blend?.to === 0 ? 'on' : ''}`} disabled={!engine.decks[0].track || (!!blend && blend.to !== 0)} onClick={() => void engine.startBlend(0)}>
+          ◀ Blend
+        </button>
+        <select className="select sm" value={blendBars} onChange={(e) => useDj.setState({ blendBars: Number(e.target.value) })} disabled={!!blend}>
+          {[4, 8, 16, 32].map((b) => (
+            <option key={b} value={b}>
+              {b} bars
+            </option>
+          ))}
+        </select>
+        <button className={`btn sm ${blend?.to === 1 ? 'on' : ''}`} disabled={!engine.decks[1].track || (!!blend && blend.to !== 1)} onClick={() => void engine.startBlend(1)}>
+          Blend ▶
+        </button>
+      </div>
+      {blend && (
+        <div className="progress" style={{ width: '100%' }}>
+          <div style={{ width: `${Math.round(blend.progress * 100)}%` }} />
+        </div>
+      )}
       <div className="seg sm">
         <button className={curve === 'smooth' ? 'on' : ''} onClick={() => engine.setCurve('smooth')}>
           Smooth

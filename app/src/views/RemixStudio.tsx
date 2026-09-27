@@ -4,17 +4,19 @@ import { BUILTIN_SOUNDS, previewDrum } from '../audio/drums';
 import { encodeWav } from '../audio/wav';
 import { Camelot, Knob, Modal, useRaf } from '../components/Controls';
 import { IconCopy, IconExport, IconFolder, IconLoop, IconPlay, IconPlus, IconRedo, IconSave, IconSplit, IconStop, IconTrash, IconUndo } from '../components/Icons';
-import { NOTE_NAMES, camelotName, fmtBpm, keyCompatibility, keyName, semitonesToMatch, shiftKey, trackKey, type Key } from '../music';
-import { remixEngine, renderProject, useSources } from '../remix/engine';
+import { camelotName, fmtBpm, keyCompatibility, keyName, semitonesToMatch, shiftKey, trackKey, type Key } from '../music';
+import { remixEngine, renderProject, stretchRatio, useSources } from '../remix/engine';
 import { type AudioClip, type Clip, type RemixProject, STEPS, barsBeats, clipEnd, newPattern, newProject, newTrack, projectLength, uid } from '../remix/model';
 import { STEM_MIME, Timeline, makeAudioClip } from '../remix/Timeline';
 import { cloneClip, findClip, preloadProject, snapBeat, useRemix } from '../remix/store';
 import { reportError, trackById, useApp } from '../store/app';
-import { STEMS, STEM_LABEL, type StemName, type Track } from '../types';
+import { STEMS, STEM_COLOR, STEM_LABEL, type StemName, type Track } from '../types';
 
 const ALL_KEYS: Key[] = [];
 for (let pc = 0; pc < 12; pc++) for (const mode of ['minor', 'major'] as const) ALL_KEYS.push({ pc, mode });
 ALL_KEYS.sort((a, b) => parseInt(camelotName(a)) - parseInt(camelotName(b)) || (a.mode === 'minor' ? -1 : 1));
+
+const FADES = [0, 0.5, 1, 2, 4, 8, 16];
 
 // ---- toolbar pieces ---------------------------------------------------------------------------
 
@@ -36,6 +38,23 @@ function PlayButton() {
   );
 }
 
+function MetronomeButton() {
+  const [on, setOn] = useState(remixEngine.metronome);
+  return (
+    <button
+      className={`btn sm ${on ? 'on' : ''}`}
+      title="Metronome click while playing (not included in exports)"
+      onClick={() => {
+        remixEngine.metronome = !on;
+        setOn(!on);
+        if (remixEngine.playing) void remixEngine.play(remixEngine.position());
+      }}
+    >
+      Click
+    </button>
+  );
+}
+
 function BpmInput() {
   const bpm = useRemix((s) => s.project.bpm);
   const [text, setText] = useState(String(bpm));
@@ -49,8 +68,8 @@ function BpmInput() {
   };
   return (
     <label className="row" style={{ gap: 4 }} title="Project tempo — every clip is time-stretched to it">
-      <input className="input sm mono" style={{ width: 62 }} value={text} onChange={(e) => setText(e.target.value)} onBlur={apply} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
-      <span className="faint" style={{ fontSize: 11 }}>
+      <input className="input sm mono" style={{ width: 58 }} value={text} onChange={(e) => setText(e.target.value)} onBlur={apply} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
+      <span className="faint" style={{ fontSize: 10 }}>
         BPM
       </span>
     </label>
@@ -87,6 +106,7 @@ function KeySelect() {
     <div className="row" style={{ gap: 6 }}>
       <select
         className="select sm"
+        style={{ width: 96 }}
         value={project.key ? `${project.key.pc}:${project.key.mode}` : ''}
         onChange={(e) => {
           const [pc, mode] = e.target.value.split(':');
@@ -108,6 +128,21 @@ function KeySelect() {
       )}
     </div>
   );
+}
+
+/** Lay out every stem of a track on its own new track, aligned at the playhead's bar. */
+function addAllStems(track: Track) {
+  const s = useRemix.getState();
+  const start = Math.floor(remixEngine.position() / 4) * 4;
+  const clips = track.stems.map((stem) => makeAudioClip(track, stem, start, s.project, true));
+  s.edit((p) => {
+    track.stems.forEach((stem, i) => {
+      const t = newTrack('audio', `${STEM_LABEL[stem]} – ${track.title}`.slice(0, 40), p.tracks.length);
+      t.color = STEM_COLOR[stem];
+      t.clips.push(clips[i]);
+      p.tracks.push(t);
+    });
+  });
 }
 
 // ---- browser --------------------------------------------------------------------------------
@@ -146,7 +181,7 @@ function Browser() {
               <div className="row faint" style={{ fontSize: 11, gap: 6, marginTop: 2 }}>
                 <span className="grow ellipsis">{t.artist}</span>
                 <span className="mono">{fmtBpm(t.bpm)}</span>
-                {t.bpm && Math.abs(projectBpm / t.bpm - 1) > 0.25 && <span title="Big tempo change — may sound unnatural">⚠</span>}
+                {t.bpm && Math.abs(stretchRatio(t, projectBpm) - 1) > 0.2 && <span title={`Needs a ${Math.round(stretchRatio(t, projectBpm) * 100)}% tempo change — may sound unnatural`}>⚠</span>}
                 {projectKey && compat === 'clash' && <span style={{ color: 'var(--bad)' }}>key</span>}
               </div>
               <div className="row" style={{ gap: 4, marginTop: 6, flexWrap: 'wrap' }}>
@@ -164,6 +199,11 @@ function Browser() {
                 <span className="chip stem-original" draggable onDragStart={(e) => drag(e, t.id, 'original')} style={{ cursor: 'grab' }} title="Drag the full mix onto the timeline">
                   Full mix
                 </span>
+                {t.stems.length > 0 && (
+                  <button className="btn sm ghost" style={{ height: 20, padding: '0 6px' }} onClick={() => addAllStems(t)} title="Add all four stems on their own tracks, lined up at the playhead">
+                    + all
+                  </button>
+                )}
               </div>
             </div>
           );
@@ -203,6 +243,27 @@ function ClipInspector() {
         <input className="input sm mono" style={{ width: 70 }} type="number" min={0.25} step={1} value={clip.length} onChange={(e) => Number(e.target.value) > 0 && edit((c) => (c.length = Number(e.target.value)))} />
         <span className="faint">beats</span>
       </div>
+      {clip.type !== 'pattern' && (
+        <>
+          <label>Fade in / out</label>
+          <div className="row">
+            <select className="select sm" value={clip.fadeIn ?? 0} onChange={(e) => edit((c) => (c.fadeIn = Number(e.target.value)))} title="Fade in">
+              {FADES.map((f) => (
+                <option key={f} value={f}>
+                  in: {f ? `${f} beat${f > 1 ? 's' : ''}` : 'none'}
+                </option>
+              ))}
+            </select>
+            <select className="select sm" value={clip.fadeOut ?? 0} onChange={(e) => edit((c) => (c.fadeOut = Number(e.target.value)))} title="Fade out">
+              {FADES.map((f) => (
+                <option key={f} value={f}>
+                  out: {f ? `${f} beat${f > 1 ? 's' : ''}` : 'none'}
+                </option>
+              ))}
+            </select>
+          </div>
+        </>
+      )}
     </>
   );
 
@@ -624,6 +685,7 @@ function ExportDialog({ onClose }: { onClose(): void }) {
   const [format, setFormat] = useState<'wav' | 'mp3'>('wav');
   const [range, setRange] = useState<'song' | 'loop'>(project.loopOn && project.loop ? 'loop' : 'song');
   const [addToLibrary, setAddToLibrary] = useState(true);
+  const [trackStems, setTrackStems] = useState(false);
   const [status, setStatus] = useState('');
   const [result, setResult] = useState<string | null>(null);
   const [sc, setSc] = useState<{ connected: boolean } | null>(null);
@@ -649,6 +711,15 @@ function ExportDialog({ onClose }: { onClose(): void }) {
         key_pc: project.key?.pc ?? null,
         key_mode: project.key?.mode ?? null,
       });
+      if (trackStems) {
+        const withClips = project.tracks.filter((t) => t.clips.length);
+        for (const [i, t] of withClips.entries()) {
+          setStatus(`Rendering track ${i + 1} of ${withClips.length}: ${t.name}…`);
+          const solo: RemixProject = { ...project, tracks: project.tracks.map((x) => ({ ...x, solo: x.id === t.id, mute: false })) };
+          const buf = await renderProject(solo, tracks, r, range === 'song');
+          await api.exportRender(encodeWav(buf), { name: `${name} - ${t.name}`, format, add_to_library: false });
+        }
+      }
       setResult(res.file);
       setStatus('');
       await useApp.getState().refreshTracks();
@@ -688,6 +759,10 @@ function ExportDialog({ onClose }: { onClose(): void }) {
         <label>Library</label>
         <label className="row">
           <input type="checkbox" checked={addToLibrary} onChange={(e) => setAddToLibrary(e.target.checked)} /> Add to my library (shows up in DJ mode)
+        </label>
+        <label>Stems</label>
+        <label className="row">
+          <input type="checkbox" checked={trackStems} onChange={(e) => setTrackStems(e.target.checked)} /> Also export every track as its own file
         </label>
       </div>
       {status && <div className="muted" style={{ marginTop: 14 }}>{status}</div>}
@@ -729,6 +804,7 @@ function ExportDialog({ onClose }: { onClose(): void }) {
 // ---- main view -------------------------------------------------------------------------------------
 
 type Bottom = 'clip' | 'drums' | 'fx';
+export const AUTOSAVE_KEY = 'stemdeck.remix.autosave';
 
 export function RemixStudio() {
   const project = useRemix((s) => s.project);
@@ -744,6 +820,39 @@ export function RemixStudio() {
   const [bottom, setBottom] = useState<Bottom>('clip');
   const [dialog, setDialog] = useState<'open' | 'export' | null>(null);
   const [autoKey, setAutoKey] = useState(true);
+
+  // Autosave unsaved work every 15 s so a crash or power cut never loses a remix.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const s = useRemix.getState();
+      if (!s.dirty) return;
+      try {
+        localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ id: s.projectId, project: s.project, time: Date.now() }));
+      } catch {
+        /* storage full or unavailable */
+      }
+    }, 15000);
+    return () => clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    let saved: { id: number | null; project: RemixProject; time: number } | null = null;
+    try {
+      saved = JSON.parse(localStorage.getItem(AUTOSAVE_KEY) || 'null');
+    } catch {
+      saved = null;
+    }
+    if (!saved?.project) return;
+    const data = saved;
+    useApp.getState().toast(`Unsaved remix “${data.project.name}” from ${new Date(data.time).toLocaleString()} was recovered.`, 'info', {
+      label: 'Restore',
+      run: () => {
+        useRemix.getState().load(data.id, { ...newProject(), ...data.project });
+        useRemix.setState({ dirty: true });
+        useApp.getState().setView('remix');
+      },
+    });
+  }, []);
 
   // Library edits (BPM/grid fixes) change how clips stretch; keep the engine in sync.
   useEffect(() => {
@@ -845,6 +954,11 @@ export function RemixStudio() {
 
   const newProjectClick = () => {
     if (dirty && !confirm('Discard unsaved changes to this remix?')) return;
+    try {
+      localStorage.removeItem(AUTOSAVE_KEY);
+    } catch {
+      /* ignore */
+    }
     const p = newProject();
     useRemix.getState().load(null, p);
   };
@@ -860,17 +974,18 @@ export function RemixStudio() {
           <IconLoop />
         </button>
         <Position />
+        <MetronomeButton />
         <BpmInput />
         <KeySelect />
         <button className={`btn sm ${autoKey ? 'on' : ''}`} onClick={() => setAutoKey(!autoKey)} title="Pitch-shift new clips onto the project key automatically">
           Auto key
         </button>
-        <select className="select sm" value={snap} onChange={(e) => useRemix.getState().set({ snap: Number(e.target.value) })} title="Snap to grid">
-          <option value={4}>Snap: bar</option>
-          <option value={1}>Snap: beat</option>
-          <option value={0.5}>Snap: 1/8</option>
-          <option value={0.25}>Snap: 1/16</option>
-          <option value={0}>Snap: off</option>
+        <select className="select sm" style={{ width: 74 }} value={snap} onChange={(e) => useRemix.getState().set({ snap: Number(e.target.value) })} title="Snap to grid">
+          <option value={4}>⌗ Bar</option>
+          <option value={1}>⌗ Beat</option>
+          <option value={0.5}>⌗ 1/8</option>
+          <option value={0.25}>⌗ 1/16</option>
+          <option value={0}>⌗ Off</option>
         </select>
         <input type="range" min={6} max={120} value={zoom} onChange={(e) => useRemix.getState().set({ zoom: Number(e.target.value) })} style={{ width: 64 }} title="Zoom" />
         <div className="row" style={{ gap: 4 }}>
@@ -892,7 +1007,9 @@ export function RemixStudio() {
         </div>
         <select
           className="select sm"
+          style={{ width: 88 }}
           value=""
+          title="Add a track"
           onChange={(e) => {
             const kind = e.target.value as 'audio' | 'drums' | 'fx';
             if (kind) useRemix.getState().edit((p) => p.tracks.push(newTrack(kind, kind === 'audio' ? `Stems ${p.tracks.length + 1}` : kind === 'drums' ? 'Drums' : 'FX', p.tracks.length)));
@@ -903,18 +1020,21 @@ export function RemixStudio() {
           <option value="drums">Drums</option>
           <option value="fx">FX / risers</option>
         </select>
-        {loading > 0 && <span className="chip busy">Stretching {loading}…</span>}
+        {loading > 0 && (
+          <span className="chip busy" title={`Time-stretching ${loading} clip source${loading > 1 ? 's' : ''} to the project tempo`}>
+            ⟳ {loading}
+          </span>
+        )}
         <div className="spacer" />
-        <input className="input sm" style={{ width: 120 }} value={project.name} title="Project name" onChange={(e) => useRemix.getState().edit((p) => (p.name = e.target.value), { structural: false, history: false })} />
-        {dirty && <span className="faint" title="Unsaved changes">●</span>}
-        <button className="btn sm" onClick={newProjectClick}>
-          New
+        <input className="input sm" style={{ width: 130 }} value={project.name} title="Project name" onChange={(e) => useRemix.getState().edit((p) => (p.name = e.target.value), { structural: false, history: false })} />
+        <button className="btn sm icon" onClick={newProjectClick} title="New project">
+          <IconPlus size={13} />
         </button>
-        <button className="btn sm" onClick={() => setDialog('open')}>
-          <IconFolder size={13} /> Open
+        <button className="btn sm icon" onClick={() => setDialog('open')} title="Open project">
+          <IconFolder size={13} />
         </button>
-        <button className="btn sm" onClick={() => void useRemix.getState().save()} title="Save (Ctrl+S)">
-          <IconSave size={13} /> Save
+        <button className={`btn sm icon ${dirty ? 'on' : ''}`} onClick={() => void useRemix.getState().save()} title={dirty ? 'Save — unsaved changes (Ctrl+S)' : 'Save (Ctrl+S)'}>
+          <IconSave size={13} />
         </button>
         <button className="btn sm primary" onClick={() => setDialog('export')}>
           <IconExport size={13} /> Export
@@ -955,15 +1075,3 @@ export function RemixStudio() {
     </div>
   );
 }
-
-export function quickAddToRemix(track: Track, stem: StemName | 'original') {
-  const s = useRemix.getState();
-  const clip = makeAudioClip(track, stem, 0, s.project, true);
-  s.edit((p) => {
-    const t = newTrack('audio', stem === 'original' ? track.title : `${STEM_LABEL[stem]} – ${track.title}`.slice(0, 40), p.tracks.length);
-    t.clips.push(clip);
-    p.tracks.push(t);
-  });
-}
-
-export { NOTE_NAMES };

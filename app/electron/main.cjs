@@ -153,6 +153,19 @@ function createWindow() {
   win.webContents.on('will-navigate', (e, url) => {
     if (!url.startsWith('http://localhost:5173') && !url.startsWith('file://')) e.preventDefault();
   });
+  // The page refuses to unload while a remix is unsaved or a DJ set is recording: ask the user.
+  win.webContents.on('will-prevent-unload', (e) => {
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'question',
+      buttons: ['Quit anyway', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'StemDeck',
+      message: 'You have an unsaved remix or a recording in progress.',
+      detail: 'Unsaved remix changes are kept as a recovery copy, but a recording in progress will be cut short.',
+    });
+    if (choice === 0) e.preventDefault();
+  });
   win.webContents.on('before-input-event', (_e, input) => {
     if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools();
   });

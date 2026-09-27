@@ -38,6 +38,7 @@ export interface Track {
   key_name: string;
   camelot: string;
   energy: number | null;
+  loudness: number | null;
   analysis_status: 'pending' | 'done' | 'error';
   stem_status: 'none' | 'queued' | 'processing' | 'done' | 'error';
   stem_quality: 'fast' | 'high' | null;

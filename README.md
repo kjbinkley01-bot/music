@@ -7,8 +7,8 @@ A free desktop app for **stem separation, remixing and DJing** — a do-it-yours
 | Section | What it does |
 |---|---|
 | **Stem Lab** | Import files/folders → auto BPM, beat grid and key (standard + Camelot) → split into vocals / drums / bass / melody in a background queue → play stems with solo/mute/volume, loop regions, change speed without changing pitch → export any combination (acapella, instrumental, drums only…) as WAV or MP3. |
-| **Remix Studio** | Multi-track timeline. Drag stems from any tracks; they're time-stretched to the project tempo and can be pitch-shifted onto the project key (with clash warnings). Snap to bars/beats, split, copy, loop and rearrange clips; per-track volume, pan, mute, solo, filter with drawable automation, reverb and delay sends; riser / downlifter / impact build-up tool; 8-voice drum step sequencer with your own samples; undo/redo; save/open projects; export to WAV/MP3 (goes straight into your DJ library). |
-| **DJ** | Two decks with scrolling stem-coloured waveforms and beat grids, play/cue (hold to preview), sync (tempo + phase, handles half/double time), pitch fader (±8/16/50%), key lock, 3-band EQ with kills, filter, crossfader (smooth/sharp), 8 hot cues, beat loops, live stem toggles, nudge, harmonic-mixing highlights in the library, master recording to WAV/MP3. |
+| **Remix Studio** | Multi-track timeline. Drag stems from any tracks (or add all four at once); they're time-stretched to the project tempo and can be pitch-shifted onto the project key (with clash warnings). Snap to bars/beats, split, copy, loop, fade and rearrange clips; per-track volume, pan, mute, solo, filter and volume automation you draw, reverb and delay sends; riser / downlifter / impact build-up tool; 8-voice drum step sequencer with your own samples; metronome; undo/redo; autosave with crash recovery; save/open projects; export to WAV/MP3 (goes straight into your DJ library), optionally with every track as a separate stem. |
+| **DJ** | Two decks with scrolling stem-coloured waveforms and beat grids, play/cue (hold to preview), sync (tempo + phase, handles half/double time), pitch fader (±8/16/50%), key lock, auto-gain, 3-band EQ with kills, filter, level meters, crossfader (smooth/sharp), one-button **Blend** transitions, 8 hot cues, beat loops, beat jump, live stem toggles, nudge, harmonic-mixing highlights in the library, master recording to WAV/MP3. |
 | **MIDI** | MIDI learn for every deck/mixer function, including relative jog wheels. Save/load mappings as JSON. |
 | **SoundCloud** *(optional)* | Official API only: OAuth sign-in, browse likes & playlists as metadata, build a wishlist with links to buy each track, upload your remixes privately. Never downloads or caches audio. |
 
@@ -102,7 +102,7 @@ scripts\run_tests.bat
 
 ### Stem Lab
 1. **Files** / **Folder**, or drag audio onto the window. MP3, WAV, FLAC, AIFF, M4A, OGG are supported.
-2. BPM, key and energy appear within seconds. Wrong BPM? Use **½× / 2×**, **Tap**, or nudge the grid (**◀ 10ms / 10ms ▶**, **+1 beat**, **Downbeat here**) under the player.
+2. BPM, key and energy appear within seconds. Wrong BPM? Use **½× / 2×**, **Tap**, or nudge the grid (**◀ 10ms / 10ms ▶**, **+1 beat**, **Downbeat here**) under the player — or right-click → **Edit track info…** to type BPM/key yourself. Search accepts a title, artist, key (`8A`, `Am`) or a BPM range (`120-128`).
 3. Right-click a track → **Separate stems (fast / high quality)**, or **Separate all**. Progress and time remaining show in the queue; the app stays responsive and you can keep working.
 4. Double-click a track to open it. Drag across the waveform to loop a region (snaps to beats), scroll to zoom, **1–4** mute stems, **Shift+1–4** solo.
 5. **Export** → current mix, a preset (Acapella, Instrumental, Drums…), or each stem separately; whole track or loop; optionally at the new speed and/or transposed.
@@ -112,7 +112,9 @@ scripts\run_tests.bat
 * **Auto key** pitch-shifts new clips onto the project key. Clips that clash show ⚠; **Match all** fixes them.
 * Drag clips to move (Alt-drag copies, drag up/down to change track), drag edges to trim. **S** splits at the playhead, **Ctrl+D** duplicates, **Ctrl+C / Ctrl+V** copy/paste at the playhead, **Delete** removes, **Ctrl+Z / Ctrl+Y** undo/redo.
 * Click the ruler to move the playhead; drag on it to set the loop.
-* Track knobs: volume, pan, filter (left = low-pass, right = high-pass), reverb and delay sends. Press **A** on a track to draw filter automation (click to add points, drag to move, right-click to delete) — perfect for sweeps.
+* **+ all** on a browser card lays out all four stems of a track on their own tracks, perfectly aligned — a great starting point: mute the parts you're replacing.
+* Track knobs: volume, pan, filter (left = low-pass, right = high-pass), reverb and delay sends. Press **A** on a track to draw **filter** or **volume** automation (click to add points, drag to move, right-click to delete) — perfect for sweeps and fades. Clips also have fade in/out in the Clip panel.
+* **Click** toggles a metronome. Unsaved work is autosaved every 15 seconds; if the app closes unexpectedly you'll be offered a restore next time.
 * **Drum sequencer**: 16-step patterns with built-in kick/snare/clap/hats/etc. or your own samples (Import samples). Double-click a Drums lane to drop a pattern clip.
 * **FX & build-ups**: insert risers, downlifters and impacts (e.g. a 4-bar riser ending at the drop).
 * **Save** (Ctrl+S) / **Open** projects. **Export** renders WAV/MP3 into `Music\StemDeck\Remixes` and adds it to your library — it appears in DJ mode automatically (filter: *Remixes*).
@@ -121,6 +123,9 @@ scripts\run_tests.bat
 * Load tracks with the **A / B** buttons, double-click, or drag a row onto a deck.
 * **CUE**: while playing jumps back to the cue point; while stopped sets the cue (snapped to the beat with Quantize) and previews while held.
 * **SYNC** matches tempo and aligns beats to the other deck. Or beat-match by ear with the pitch fader and the ◀◀ / ▶▶ nudge buttons.
+* **Auto-gain** sets each channel's gain knob from the track's measured loudness, so tracks come in at the same volume. Watch the meters: green is good, red means clipping.
+* **Blend ▶ / ◀ Blend** does a full transition for you: starts the other deck in sync, moves the crossfader over 4–32 bars and swaps the bass halfway so two kick drums never clash. Great for learning what a clean mix sounds like.
+* **⇤ / ⇥** beat-jump one bar (Shift: four bars).
 * **Hot cues** 1–8: click to set/jump, Shift-click to clear. **Beat loops** 1–16 beats, ÷2 / ×2.
 * **Stems**: toggle vocals/drums/bass/melody live on separated tracks — e.g. drop the vocals on deck A while deck B's acapella comes in.
 * The library highlights tracks that are **key-compatible (Camelot) and within ~6% BPM** of what's loaded (green bar; *Harmonic* filter).
@@ -205,7 +210,7 @@ Your data lives in `%APPDATA%\StemDeck` (library database, stems, cache, samples
 * **F12** opens developer tools if you want to see console errors.
 
 ## Future ideas
-See [ROADMAP.md](ROADMAP.md).
+See [ROADMAP.md](ROADMAP.md) — headphone pre-listen, key shift on decks, crates, Roformer acapellas and more.
 
 ## Legal
 Use StemDeck with music you own or have the rights to use. Rubber Band is GPL; Demucs is MIT; ffmpeg (via imageio-ffmpeg) is LGPL/GPL.

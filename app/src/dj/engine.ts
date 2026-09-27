@@ -8,7 +8,15 @@ import { create } from 'zustand';
 
 export type XfadeCurve = 'smooth' | 'sharp';
 
+export interface BlendState {
+  to: 0 | 1;
+  bars: number;
+  progress: number;
+}
+
 interface DjUi {
+  blend: BlendState | null;
+  blendBars: number;
   xfade: number;
   curve: XfadeCurve;
   recording: boolean;
@@ -19,6 +27,8 @@ interface DjUi {
 }
 
 export const useDj = create<DjUi>(() => ({
+  blend: null,
+  blendBars: 16,
   xfade: 0,
   curve: 'smooth',
   recording: false,
@@ -33,6 +43,8 @@ class DjEngine {
   private sideA: GainNode;
   private sideB: GainNode;
   private master: GainNode;
+  readonly masterAnalyser: AnalyserNode;
+  private blendTimer: number | null = null;
   private recorder: AudioWorkletNode | null = null;
   private uploads: Promise<unknown> = Promise.resolve();
   private recordStart = 0;
@@ -43,6 +55,9 @@ class DjEngine {
     this.master = ctx.createGain();
     this.master.gain.value = 0.81;
     this.master.connect(masterBus());
+    this.masterAnalyser = ctx.createAnalyser();
+    this.masterAnalyser.fftSize = 1024;
+    this.master.connect(this.masterAnalyser);
     this.sideA = ctx.createGain();
     this.sideB = ctx.createGain();
     this.sideA.connect(this.master);
@@ -100,6 +115,56 @@ class DjEngine {
   setMasterVolume(v: number) {
     this.master.gain.setTargetAtTime(v * v, audioContext().currentTime, 0.01);
     useDj.setState({ masterVolume: v });
+  }
+
+  // ---- automatic transition ------------------------------------------------------------
+
+  /**
+   * Beginner-friendly transition: starts the incoming deck in sync, then over N bars moves the
+   * crossfader across and swaps the bass halfway (incoming bass fades in as outgoing bass fades
+   * out) so the two kick drums never fight. Calling it again cancels.
+   */
+  async startBlend(to: 0 | 1, bars = useDj.getState().blendBars) {
+    if (useDj.getState().blend) return this.cancelBlend();
+    const incoming = this.decks[to];
+    const outgoing = this.other(incoming);
+    if (!incoming.track) return;
+    if (outgoing.playing && outgoing.bpm && incoming.bpm) incoming.syncTo(outgoing);
+    const eqIn = incoming.eq.low;
+    const eqOut = outgoing.eq.low;
+    if (outgoing.playing) incoming.setEq('low', -26);
+    if (!incoming.playing) {
+      await incoming.play();
+      if (outgoing.playing && outgoing.bpm && incoming.bpm) incoming.syncTo(outgoing); // re-align phase now it's running
+    }
+    const bpm = outgoing.playing && outgoing.effectiveBpm ? outgoing.effectiveBpm : incoming.effectiveBpm || 120;
+    const duration = (bars * 4 * 60 * 1000) / bpm;
+    const x0 = useDj.getState().xfade;
+    const x1 = to === 1 ? 1 : -1;
+    const start = performance.now();
+    const smooth = (t: number) => t * t * (3 - 2 * t);
+    useDj.setState({ blend: { to, bars, progress: 0 } });
+    this.blendTimer = window.setInterval(() => {
+      const t = Math.min(1, (performance.now() - start) / duration);
+      this.setCrossfader(x0 + (x1 - x0) * smooth(t));
+      const swap = Math.min(1, Math.max(0, (t - 0.4) / 0.2)); // bass swap between 40% and 60%
+      if (outgoing.playing) {
+        incoming.setEq('low', -26 + (Math.max(eqIn, -26) + 26) * swap);
+        outgoing.setEq('low', eqOut + (-26 - eqOut) * swap);
+      }
+      useDj.setState({ blend: { to, bars, progress: t } });
+      if (t >= 1) {
+        this.cancelBlend();
+        if (outgoing.playing) outgoing.pause();
+        outgoing.setEq('low', eqOut);
+      }
+    }, 30);
+  }
+
+  cancelBlend() {
+    if (this.blendTimer != null) clearInterval(this.blendTimer);
+    this.blendTimer = null;
+    useDj.setState({ blend: null });
   }
 
   // ---- master recording --------------------------------------------------------------

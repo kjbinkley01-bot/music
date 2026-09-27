@@ -5,7 +5,7 @@ import { keyCompatibility, semitonesToMatch, shiftKey, trackKey } from '../music
 import { trackById, useApp } from '../store/app';
 import { STEM_COLOR, STEM_LABEL, type StemName, type Track } from '../types';
 import { TRACK_MIME } from '../views/LibraryTable';
-import { clipSourceKey, getLoadedSource, remixEngine, useSources } from './engine';
+import { clipSourceKey, getLoadedSource, remixEngine, sourceBpm, useSources } from './engine';
 import { type AudioClip, type AutoPoint, type Clip, type RemixProject, type RemixTrack, type SourceStem, clipEnd, newTrack, projectLength, uid } from './model';
 import { snapBeat, useRemix } from './store';
 
@@ -18,7 +18,7 @@ const LANE_H = 84;
 
 /** Create an audio clip for a library track stem, positioned at `beat`. */
 export function makeAudioClip(track: Track, stem: SourceStem, beat: number, project: RemixProject, autoKey: boolean): AudioClip {
-  const bpm = track.bpm || project.bpm;
+  const bpm = sourceBpm(track, project.bpm);
   const beats = Math.max(1, Math.floor(((track.duration - (track.first_beat || 0)) * bpm) / 60));
   const semis = autoKey && project.key ? semitonesToMatch(trackKey(track), project.key) : 0;
   return { id: uid(), type: 'audio', start: beat, length: beats, gain: 1, trackId: track.id, stem, offset: 0, semitones: semis, loopLen: null };
@@ -224,6 +224,16 @@ function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Cl
         {!srcReady && (loading ? ' · stretching…' : ' · unavailable')}
       </div>
       <ClipBody clip={clip} project={project} width={width} height={height - 6} color={color} />
+      {(clip.fadeIn || clip.fadeOut) && clip.type !== 'pattern' ? (
+        <svg width={width} height={height - 6} style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
+          <polyline
+            points={`0,${height - 6} ${(clip.fadeIn ?? 0) * zoom},16 ${width - (clip.fadeOut ?? 0) * zoom},16 ${width},${height - 6}`}
+            fill="none"
+            stroke="rgba(255,255,255,0.7)"
+            strokeWidth={1.2}
+          />
+        </svg>
+      ) : null}
       <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} />
       <div style={{ position: 'absolute', right: 0, top: 0, bottom: 0, width: 6, cursor: 'ew-resize' }} />
     </div>
@@ -235,36 +245,45 @@ function ClipView({ clip, track, trackIndex, project, zoom, height }: { clip: Cl
 function AutomationLane({ track, index, zoom, width }: { track: RemixTrack; index: number; zoom: number; width: number }) {
   const drag = useRef<number | null>(null);
   const ref = useRef<SVGSVGElement>(null);
+  const param = track.autoParam ?? 'filter';
+  const [lo, hi] = param === 'filter' ? [-1, 1] : [0, 1];
+  const color = param === 'filter' ? '#b98cff' : '#5ad1ff';
+  const pts = (param === 'filter' ? track.auto : track.volAuto) ?? [];
+  const base = param === 'filter' ? track.filter : 1;
   const h = AUTO_H;
-  const toY = (v: number) => ((1 - (v + 1) / 2) * (h - 8)) + 4;
+  const toY = (v: number) => (1 - (v - lo) / (hi - lo)) * (h - 8) + 4;
   const fromEvent = (e: React.PointerEvent) => {
     const r = ref.current!.getBoundingClientRect();
     const { snap } = useRemix.getState();
     return {
       beat: Math.max(0, snapBeat((e.clientX - r.left) / zoom, snap ? Math.min(snap, 0.25) : 0)),
-      value: Math.max(-1, Math.min(1, 1 - ((e.clientY - r.top - 4) / (h - 8)) * 2)),
+      value: Math.max(lo, Math.min(hi, hi - ((e.clientY - r.top - 4) / (h - 8)) * (hi - lo))),
     };
   };
-  const setPoints = (fn: (pts: AutoPoint[]) => AutoPoint[], history: boolean) =>
+  const setPoints = (fn: (list: AutoPoint[]) => AutoPoint[], history: boolean) =>
     useRemix.getState().edit(
       (p) => {
         const t = p.tracks[index];
-        t.auto = fn(t.auto).sort((a, b) => a.beat - b.beat);
+        const next = fn((param === 'filter' ? t.auto : t.volAuto) ?? []).sort((a, b) => a.beat - b.beat);
+        if (param === 'filter') t.auto = next;
+        else t.volAuto = next;
       },
       { structural: true, history },
     );
-  const pts = track.auto;
   const path = pts.length
     ? `M 0 ${toY(pts[0].value)} ` + pts.map((p) => `L ${p.beat * zoom} ${toY(p.value)}`).join(' ') + ` L ${width} ${toY(pts[pts.length - 1].value)}`
-    : `M 0 ${toY(track.filter)} L ${width} ${toY(track.filter)}`;
+    : `M 0 ${toY(base)} L ${width} ${toY(base)}`;
+  const describe = (v: number) =>
+    param === 'volume' ? `Volume ${Math.round(v * 100)}%` : `${v < 0 ? 'Low pass' : v > 0 ? 'High pass' : 'Open'} ${Math.round(Math.abs(v) * 100)}%`;
   return (
     <svg
       ref={ref}
       width={width}
       height={h}
-      style={{ display: 'block', background: 'rgba(185,140,255,0.05)', borderTop: '1px dashed rgba(185,140,255,0.25)', cursor: 'crosshair' }}
+      style={{ display: 'block', background: `${color}0d`, borderTop: `1px dashed ${color}40`, cursor: 'crosshair' }}
       onPointerDown={(e) => {
         if (e.button !== 0) return;
+        e.stopPropagation();
         const pt = fromEvent(e);
         (e.currentTarget as Element).setPointerCapture(e.pointerId);
         setPoints((list) => [...list, pt], true);
@@ -279,36 +298,31 @@ function AutomationLane({ track, index, zoom, width }: { track: RemixTrack; inde
       }}
       onPointerUp={() => (drag.current = null)}
     >
-      <line x1={0} x2={width} y1={toY(0)} y2={toY(0)} stroke="rgba(255,255,255,0.08)" />
-      <path d={path} stroke="#b98cff" strokeWidth={2} fill="none" />
+      {param === 'filter' && <line x1={0} x2={width} y1={toY(0)} y2={toY(0)} stroke="rgba(255,255,255,0.08)" />}
+      <path d={path} stroke={color} strokeWidth={2} fill="none" />
       {pts.map((p, i) => (
         <circle
           key={i}
           cx={p.beat * zoom}
           cy={toY(p.value)}
           r={5}
-          fill="#b98cff"
+          fill={color}
           stroke="#fff"
           strokeWidth={1}
           style={{ cursor: 'move' }}
           onPointerDown={(e) => {
             e.stopPropagation();
-            if (e.button === 2) return;
-            (e.currentTarget as Element).setPointerCapture(e.pointerId);
+            if (e.button !== 0) return;
             useRemix.getState().checkpoint();
             drag.current = p.beat;
-            (e.currentTarget.ownerSVGElement as SVGSVGElement).setPointerCapture(e.pointerId);
+            ref.current!.setPointerCapture(e.pointerId);
           }}
           onContextMenu={(e) => {
             e.preventDefault();
             setPoints((list) => list.filter((_, j) => j !== i), true);
           }}
-          onDoubleClick={(e) => {
-            e.stopPropagation();
-            setPoints((list) => list.filter((_, j) => j !== i), true);
-          }}
         >
-          <title>{`${p.value < 0 ? 'Low pass' : p.value > 0 ? 'High pass' : 'Open'} ${Math.round(Math.abs(p.value) * 100)}% — right-click to delete`}</title>
+          <title>{`${describe(p.value)} — drag to move, right-click to delete`}</title>
         </circle>
       ))}
     </svg>
@@ -348,7 +362,7 @@ function TrackHeader({ track, index, height }: { track: RemixTrack; index: numbe
         <button className={`btn sm icon ${track.solo ? 'on' : ''}`} style={{ ['--c' as string]: 'var(--warn)' }} onClick={() => set((t) => (t.solo = !t.solo))} title="Solo">
           S
         </button>
-        <button className={`btn sm icon ${track.showAuto ? 'on' : ''}`} style={{ ['--c' as string]: '#b98cff' }} onClick={() => set((t) => (t.showAuto = !t.showAuto))} title="Show filter automation lane">
+        <button className={`btn sm icon ${track.showAuto ? 'on' : ''}`} style={{ ['--c' as string]: '#b98cff' }} onClick={() => set((t) => (t.showAuto = !t.showAuto))} title="Show the automation lane (filter sweeps and volume rides)">
           A
         </button>
       </div>
@@ -549,12 +563,26 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
               {t.showAuto && (
                 <div style={{ display: 'flex' }}>
                   <div style={{ position: 'sticky', left: 0, zIndex: 4, width: HEADER_W, flex: 'none', height: AUTO_H, background: 'rgba(10,12,20,0.92)', padding: '6px 10px', borderLeft: '3px solid #b98cff' }}>
-                    <div style={{ fontSize: 11, fontWeight: 700 }}>Filter automation</div>
+                    <div className="seg sm">
+                      {(['filter', 'volume'] as const).map((param) => (
+                        <button
+                          key={param}
+                          className={(t.autoParam ?? 'filter') === param ? 'on' : ''}
+                          onClick={() => useRemix.getState().edit((p) => (p.tracks[i].autoParam = param), { structural: false, history: false })}
+                        >
+                          {param === 'filter' ? 'Filter' : 'Volume'}
+                        </button>
+                      ))}
+                    </div>
                     <div className="row" style={{ gap: 4, marginTop: 4 }}>
                       <button className={`btn sm ${t.autoOn ? 'on' : ''}`} style={{ ['--c' as string]: '#b98cff' }} onClick={() => useRemix.getState().edit((p) => (p.tracks[i].autoOn = !p.tracks[i].autoOn))}>
                         {t.autoOn ? 'On' : 'Off'}
                       </button>
-                      <button className="btn sm" disabled={!t.auto.length} onClick={() => useRemix.getState().edit((p) => (p.tracks[i].auto = []))}>
+                      <button
+                        className="btn sm"
+                        disabled={!((t.autoParam ?? 'filter') === 'filter' ? t.auto : t.volAuto ?? []).length}
+                        onClick={() => useRemix.getState().edit((p) => ((p.tracks[i].autoParam ?? 'filter') === 'filter' ? (p.tracks[i].auto = []) : (p.tracks[i].volAuto = [])))}
+                      >
                         Clear
                       </button>
                     </div>

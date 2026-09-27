@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     key_mode TEXT,
     key_confidence REAL,
     energy REAL,
+    loudness REAL,
     analysis_status TEXT NOT NULL DEFAULT 'pending',
     stem_status TEXT NOT NULL DEFAULT 'none',
     stem_quality TEXT,
@@ -89,12 +90,20 @@ class Database:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.execute("PRAGMA foreign_keys=ON")
             self._conn.executescript(SCHEMA)
+            self._migrate()
             # Jobs interrupted by a crash or shutdown go back to the queue.
             self._conn.execute("UPDATE jobs SET status='queued', progress=0 WHERE status='running'")
             self._conn.execute(
                 "UPDATE tracks SET stem_status='queued' WHERE stem_status='processing'"
             )
         self.revision = 0
+
+    def _migrate(self) -> None:
+        """Add columns introduced after the first release to existing libraries."""
+        have = {r[1] for r in self._conn.execute("PRAGMA table_info(tracks)").fetchall()}
+        for column, decl in (("loudness", "REAL"),):
+            if column not in have:
+                self._conn.execute(f"ALTER TABLE tracks ADD COLUMN {column} {decl}")
 
     def bump(self) -> None:
         self.revision += 1

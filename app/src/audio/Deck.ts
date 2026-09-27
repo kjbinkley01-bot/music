@@ -6,6 +6,9 @@ import { type LoadedSource, sumPeaks, toInt16 } from './loader';
 
 type Listener = () => void;
 
+/** Target loudness (dBFS, gated RMS) that auto-gain brings every track to. */
+export const AUTO_GAIN_TARGET = -11;
+
 export interface DeckLoop {
   start: number;
   end: number;
@@ -21,6 +24,8 @@ export class Deck {
   readonly output: GainNode;
   readonly trim: GainNode;
   readonly fader: GainNode;
+  /** Post-fader tap for level meters. */
+  readonly analyser: AnalyserNode;
   private node: AudioWorkletNode | null = null;
   private eqLow: BiquadFilterNode;
   private eqMid: BiquadFilterNode;
@@ -48,6 +53,9 @@ export class Deck {
   eq = { low: 0, mid: 0, high: 0 }; // dB, -26 (kill) .. +6
   filter = 0; // -1 (low pass) .. 0 (off) .. +1 (high pass)
   volume = 1;
+  /** Channel gain in dB. With auto-gain on it is set from the track's measured loudness. */
+  gainDb = 0;
+  autoGain = true;
   private basePos = 0; // seconds
   private baseTime = 0; // performance.now() at basePos
   private nudge = 0;
@@ -74,8 +82,11 @@ export class Deck {
     this.lp.frequency.value = 22000;
     this.fader = ctx.createGain();
     this.output = ctx.createGain();
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 1024;
     this.trim.connect(this.eqLow).connect(this.eqMid).connect(this.eqHigh).connect(this.hp).connect(this.lp);
     this.lp.connect(this.fader).connect(this.output);
+    this.fader.connect(this.analyser);
     if (destination) this.output.connect(destination);
   }
 
@@ -158,6 +169,7 @@ export class Deck {
     this.basePos = 0;
     this.cuePoint = track.first_beat && track.first_beat < 2 ? track.first_beat : 0;
     node.port.postMessage({ type: 'load', stems, length, gains: sources.map(() => 1) }, transfer);
+    if (this.autoGain) this.setGain(track.loudness != null ? AUTO_GAIN_TARGET - track.loudness : 0);
     this.post({ type: 'rate', rate: this.rate });
     this.post({ type: 'keylock', on: this.keyLock });
     this.seek(this.cuePoint);
@@ -487,7 +499,19 @@ export class Deck {
     this.emit();
   }
 
-  setTrim(db: number) {
-    this.trim.gain.setTargetAtTime(Math.pow(10, db / 20), audioContext().currentTime, 0.01);
+  setGain(db: number) {
+    this.gainDb = clamp(db, -12, 12);
+    this.trim.gain.setTargetAtTime(Math.pow(10, this.gainDb / 20), audioContext().currentTime, 0.01);
+    this.emit();
+  }
+
+  /** Jump forward/back by a number of beats (keeps playing, stays on the grid). */
+  beatJump(beats: number) {
+    if (!this.track) return;
+    const len = beats * this.beatLength;
+    if (this.loop) {
+      this.setLoop(this.loop.start + len, this.loop.end + len, this.loop.beats, false);
+    }
+    this.seek(this.position + len);
   }
 }

@@ -7,14 +7,18 @@ export type SourceStem = StemName | 'original';
 
 export interface AutoPoint {
   beat: number;
-  value: number; // -1 (low pass) .. +1 (high pass)
+  value: number; // filter: -1 (low pass) .. +1 (high pass); volume: 0 .. 1
 }
+
+export type AutoParam = 'filter' | 'volume';
 
 interface ClipBase {
   id: string;
   start: number; // beats
   length: number; // beats
   gain: number;
+  fadeIn?: number; // beats (audio and FX clips)
+  fadeOut?: number; // beats
 }
 
 export interface AudioClip extends ClipBase {
@@ -50,7 +54,9 @@ export interface RemixTrack {
   reverb: number;
   delay: number;
   filter: number;
-  auto: AutoPoint[];
+  auto: AutoPoint[]; // filter automation
+  volAuto?: AutoPoint[]; // volume automation (multiplies the fader)
+  autoParam?: AutoParam; // which lane is shown
   autoOn: boolean;
   showAuto: boolean;
   clips: Clip[];
@@ -108,6 +114,8 @@ export function newTrack(kind: TrackKind, name: string, index: number): RemixTra
     delay: 0,
     filter: 0,
     auto: [],
+    volAuto: [],
+    autoParam: 'filter',
     autoOn: true,
     showAuto: false,
     clips: [],

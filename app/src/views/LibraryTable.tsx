@@ -1,8 +1,8 @@
 import { type ReactNode, memo, useMemo, useState } from 'react';
 import { api } from '../api';
-import { Camelot } from '../components/Controls';
+import { Camelot, Modal } from '../components/Controls';
 import { IconSearch } from '../components/Icons';
-import { type Key, bpmMatch, fmtBpm, fmtTime, keyCompatibility, trackKey } from '../music';
+import { type Key, bpmMatch, camelotName, fmtBpm, fmtTime, keyCompatibility, keyName, trackKey } from '../music';
 import { reportError, useApp } from '../store/app';
 import type { Job, Track } from '../types';
 
@@ -75,6 +75,7 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'added', dir: -1 });
   const [filter, setFilter] = useState<Filter>('all');
   const [menu, setMenu] = useState<{ x: number; y: number; track: Track } | null>(null);
+  const [editing, setEditing] = useState<Track | null>(null);
 
   const jobByTrack = useMemo(() => {
     const m = new Map<number, Job>();
@@ -84,8 +85,16 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
+    // "120-128" filters by BPM range (half/double time included); "8A" or "am" by key
+    const range = /^(\d{2,3})\s*-\s*(\d{2,3})$/.exec(q);
+    const inRange = (bpm: number | null) =>
+      !!bpm && !!range && [bpm, bpm * 2, bpm / 2].some((b) => b >= Number(range[1]) && b <= Number(range[2]));
     let list = tracks.filter(
-      (t) => !q || t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.camelot.toLowerCase() === q || t.key_name.toLowerCase() === q,
+      (t) =>
+        !q ||
+        (range
+          ? inRange(t.bpm)
+          : t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q) || t.camelot.toLowerCase() === q || t.key_name.toLowerCase() === q),
     );
     if (filter === 'stems') list = list.filter((t) => t.stem_status === 'done');
     if (filter === 'remixes') list = list.filter((t) => t.is_remix);
@@ -137,7 +146,7 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
       <div className="row" style={{ padding: '8px 12px', borderBottom: '1px solid var(--line)' }}>
         <div className="row grow" style={{ position: 'relative' }}>
           <IconSearch size={14} style={{ position: 'absolute', left: 9, color: 'var(--text-faint)' }} />
-          <input className="input sm grow" style={{ paddingLeft: 28 }} placeholder="Search title, artist or key (8A)…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input className="input sm grow" style={{ paddingLeft: 28 }} placeholder="Search title, artist, key (8A) or BPM range (120-128)…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
         <div className="seg sm">
           {(['all', 'stems', 'remixes', ...(compatWith?.length ? ['compatible'] : [])] as Filter[]).map((f) => (
@@ -225,12 +234,14 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
           </table>
         )}
       </div>
+      {editing && <TrackEditor track={editing} onClose={() => setEditing(null)} />}
       {menu && (
         <div className="glass" style={{ position: 'fixed', left: menu.x, top: menu.y, zIndex: 70, padding: 5, minWidth: 210 }} onClick={(e) => e.stopPropagation()}>
           {[
             { label: 'Separate stems (fast)', run: () => run(() => api.separate([menu.track.id], 'fast'), 'Queue failed') },
             { label: 'Separate stems (high quality)', run: () => run(() => api.separate([menu.track.id], 'high'), 'Queue failed') },
             { label: 'Re-analyse BPM & key', run: () => run(() => api.analyze([menu.track.id]), 'Analysis failed') },
+            { label: 'Edit track info…', run: () => (setMenu(null), setEditing(menu.track)) },
             { label: 'Show file in folder', run: () => (setMenu(null), window.stemdeck?.showItem(menu.track.path)) },
             {
               label: 'Remove from library',
@@ -251,3 +262,66 @@ export const LibraryTable = memo(function LibraryTable({ selectedId, onSelect, o
     </div>
   );
 });
+
+const KEY_OPTIONS: Key[] = Array.from({ length: 24 }, (_, i) => ({ pc: i % 12, mode: i < 12 ? ('minor' as const) : ('major' as const) })).sort(
+  (a, b) => parseInt(camelotName(a)) - parseInt(camelotName(b)) || (a.mode === 'minor' ? -1 : 1),
+);
+
+/** Fix detection mistakes by hand: title, artist, BPM, grid offset and key. */
+function TrackEditor({ track, onClose }: { track: Track; onClose(): void }) {
+  const [title, setTitle] = useState(track.title);
+  const [artist, setArtist] = useState(track.artist);
+  const [bpm, setBpm] = useState(track.bpm ? String(track.bpm) : '');
+  const [firstBeat, setFirstBeat] = useState(String(track.first_beat ?? 0));
+  const [key, setKey] = useState(track.key_pc != null && track.key_mode ? `${track.key_pc}:${track.key_mode}` : '');
+  const save = async () => {
+    const patch: Partial<Track> = { title: title.trim() || track.title, artist: artist.trim() };
+    const b = Number(bpm);
+    if (b > 20 && b < 400) patch.bpm = b;
+    const fb = Number(firstBeat);
+    if (Number.isFinite(fb)) patch.first_beat = fb;
+    if (key) {
+      const [pc, mode] = key.split(':');
+      patch.key_pc = Number(pc);
+      patch.key_mode = mode as Track['key_mode'];
+    }
+    try {
+      useApp.getState().patchTrackLocal(await api.patchTrack(track.id, patch));
+      onClose();
+    } catch (e) {
+      reportError(e, 'Could not save');
+    }
+  };
+  return (
+    <Modal title="Edit track info" onClose={onClose} width={460}>
+      <div className="form-grid" style={{ gridTemplateColumns: '110px 1fr' }}>
+        <label>Title</label>
+        <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
+        <label>Artist</label>
+        <input className="input" value={artist} onChange={(e) => setArtist(e.target.value)} />
+        <label>BPM</label>
+        <input className="input mono" value={bpm} onChange={(e) => setBpm(e.target.value)} />
+        <label>First beat (s)</label>
+        <input className="input mono" value={firstBeat} onChange={(e) => setFirstBeat(e.target.value)} />
+        <div className="hint">Where beat 1 of the grid sits. Stem Lab’s grid tools set this visually.</div>
+        <label>Key</label>
+        <select className="select" value={key} onChange={(e) => setKey(e.target.value)}>
+          {!key && <option value="">Unknown</option>}
+          {KEY_OPTIONS.map((k) => (
+            <option key={`${k.pc}:${k.mode}`} value={`${k.pc}:${k.mode}`}>
+              {camelotName(k)} · {keyName(k)}
+            </option>
+          ))}
+        </select>
+      </div>
+      <div className="row" style={{ justifyContent: 'flex-end', marginTop: 18 }}>
+        <button className="btn" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn primary" onClick={save}>
+          Save
+        </button>
+      </div>
+    </Modal>
+  );
+}

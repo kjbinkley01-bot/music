@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { api, browserEngineFromUrl, configureEngine } from './api';
 import { Modal, Toasts } from './components/Controls';
 import { IconCloud, IconDisc, IconGear, IconMidi, IconSliders, IconWave } from './components/Icons';
+import { useDj } from './dj/engine';
 import { initMidi } from './midi/midi';
+import { useRemix } from './remix/store';
 import { type View, useApp } from './store/app';
 import type { EngineState } from './types';
 import { DjView } from './views/DjView';
 import { MidiView } from './views/MidiView';
-import { RemixStudio } from './views/RemixStudio';
+import { AUTOSAVE_KEY, RemixStudio } from './views/RemixStudio';
 import { SettingsView } from './views/SettingsView';
 import { SoundCloudView } from './views/SoundCloudView';
 import { StemLab, importPaths } from './views/StemLab';
@@ -177,6 +179,26 @@ export function App() {
     void initMidi();
     return () => clearInterval(id);
   }, [healthy]);
+
+  // Ask before closing with an unsaved remix or while recording (Electron shows a dialog).
+  useEffect(() => {
+    const onUnload = (e: BeforeUnloadEvent) => {
+      const remix = useRemix.getState();
+      if (remix.dirty) {
+        try {
+          localStorage.setItem(AUTOSAVE_KEY, JSON.stringify({ id: remix.projectId, project: remix.project, time: Date.now() }));
+        } catch {
+          /* ignore */
+        }
+      }
+      if (remix.dirty || useDj.getState().recording) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', onUnload);
+    return () => window.removeEventListener('beforeunload', onUnload);
+  }, []);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

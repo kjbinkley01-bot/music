@@ -91,6 +91,21 @@ def estimate_energy(y: np.ndarray, onset_env: np.ndarray) -> float:
     return round(float(1 + 9 * np.clip(0.55 * loudness + 0.45 * np.clip(busy * 2.5, 0, 1), 0, 1)), 1)
 
 
+def estimate_loudness(y: np.ndarray, sr: int) -> float:
+    """Approximate programme loudness in dBFS: RMS over the louder half of 400 ms blocks.
+
+    A simplified take on EBU R128 gating: quiet intros and breakdowns don't drag the value down,
+    so two tracks with the same number sound about equally loud. Used for DJ auto-gain.
+    """
+    block = int(0.4 * sr)
+    n = len(y) // block
+    if n == 0:
+        return -60.0
+    power = np.mean(y[: n * block].reshape(n, block) ** 2, axis=1)
+    loud = power[power >= np.median(power)]
+    return round(float(10 * np.log10(np.mean(loud) + 1e-12)), 2)
+
+
 def refine_tempo(onset_env: np.ndarray, frame_rate: float, coarse_bpm: float, phase_env: np.ndarray | None = None) -> tuple[float, float]:
     """Precise tempo and grid phase from the whole track.
 
@@ -145,5 +160,6 @@ def analyze(path: str) -> dict:
         "key_mode": key_mode,
         "key_confidence": key_conf,
         "energy": estimate_energy(y, onset_env),
+        "loudness": estimate_loudness(y, ANALYSIS_SR),
         "duration": round(y.size / ANALYSIS_SR, 3),
     }

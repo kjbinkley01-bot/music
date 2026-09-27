@@ -13,7 +13,10 @@ import { LibraryTable } from './LibraryTable';
 
 let labDeck: Deck | null = null;
 export function stemLabDeck(): Deck {
-  if (!labDeck) labDeck = new Deck('lab', masterBus());
+  if (!labDeck) {
+    labDeck = new Deck('lab', masterBus());
+    labDeck.autoGain = false; // Stem Lab plays files at their true level, like the exports
+  }
   return labDeck;
 }
 

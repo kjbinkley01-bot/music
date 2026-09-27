@@ -37,9 +37,23 @@ export const useSources = create<{ version: number; loading: number; errors: Rec
   errors: {},
 }));
 
+/**
+ * The tempo a source is treated as in a project: its BPM, or double/half of it when that is
+ * closer to the project tempo (a 64 BPM hip-hop loop in a 128 project plays in double time
+ * instead of being stretched 2x).
+ */
+export function sourceBpm(track: Pick<Track, 'bpm'> | undefined, projectBpm: number): number {
+  if (!track?.bpm) return projectBpm;
+  let best = track.bpm;
+  for (const m of [0.5, 2]) {
+    if (Math.abs(Math.log(projectBpm / (track.bpm * m))) < Math.abs(Math.log(projectBpm / best)) - 0.05) best = track.bpm * m;
+  }
+  return best;
+}
+
 export function stretchRatio(track: Pick<Track, 'bpm'> | undefined, projectBpm: number): number {
   if (!track?.bpm) return 1;
-  const r = projectBpm / track.bpm;
+  const r = projectBpm / sourceBpm(track, projectBpm);
   return Math.abs(r - 1) < 0.0015 ? 1 : Math.round(r * 100000) / 100000;
 }
 
@@ -102,6 +116,7 @@ interface TrackNodes {
   input: GainNode;
   lp: BiquadFilterNode;
   hp: BiquadFilterNode;
+  autoVol: GainNode;
   pan: StereoPannerNode;
   vol: GainNode;
   out: GainNode;
@@ -193,6 +208,7 @@ function syncGraph(g: Graph, p: RemixProject, now: number) {
         input: ctx.createGain(),
         lp: ctx.createBiquadFilter(),
         hp: ctx.createBiquadFilter(),
+        autoVol: ctx.createGain(),
         pan: ctx.createStereoPanner(),
         vol: ctx.createGain(),
         out: ctx.createGain(),
@@ -201,7 +217,7 @@ function syncGraph(g: Graph, p: RemixProject, now: number) {
       };
       n.lp.type = 'lowpass';
       n.hp.type = 'highpass';
-      n.input.connect(n.lp).connect(n.hp).connect(n.pan).connect(n.vol).connect(n.out).connect(g.master);
+      n.input.connect(n.lp).connect(n.hp).connect(n.autoVol).connect(n.pan).connect(n.vol).connect(n.out).connect(g.master);
       n.vol.connect(n.reverb).connect(g.reverbIn);
       n.vol.connect(n.delay).connect(g.delayIn);
       g.tracks.set(t.id, n);
@@ -214,6 +230,10 @@ function syncGraph(g: Graph, p: RemixProject, now: number) {
     n.delay.gain.setTargetAtTime(t.delay * on, now, 0.01);
     n.pan.pan.setTargetAtTime(t.pan, now, 0.01);
     if (!(t.autoOn && t.auto.length)) applyFilter(n, t, now, false);
+    if (!(t.autoOn && t.volAuto?.length)) {
+      n.autoVol.gain.cancelScheduledValues(now);
+      n.autoVol.gain.setTargetAtTime(1, now, 0.01);
+    }
   }
 }
 
@@ -226,21 +246,50 @@ function applyFilter(n: TrackNodes, t: RemixTrack, now: number, immediate: boole
   }
 }
 
-/** Schedule filter automation for [fromBeat, toBeat) starting at ctx time `at`. */
+/** Schedule filter and volume automation for [fromBeat, toBeat) starting at ctx time `at`. */
 function scheduleAutomation(g: Graph, p: RemixProject, fromBeat: number, toBeat: number, at: number) {
   const spb = 60 / p.bpm;
-  for (const t of p.tracks) {
-    const n = g.tracks.get(t.id);
-    if (!n || !(t.autoOn && t.auto.length)) continue;
-    const params = [n.lp.frequency, n.hp.frequency, n.lp.Q, n.hp.Q];
+  const step = Math.max(0.125, (toBeat - fromBeat) / 4000);
+  const ramp = (params: AudioParam[], values: (beat: number) => number[]) => {
     params.forEach((pr) => pr.cancelScheduledValues(at));
-    const step = Math.max(0.125, (toBeat - fromBeat) / 4000);
     for (let b = fromBeat, first = true; b <= toBeat + 1e-9; b += step, first = false) {
-      const [lp, hp, q] = filterFreqs(autoValueAt(t.auto, b, t.filter));
+      const vals = values(b);
       const time = at + (b - fromBeat) * spb;
-      const vals = [lp, hp, q, q];
       params.forEach((pr, i) => (first ? pr.setValueAtTime(vals[i], time) : pr.linearRampToValueAtTime(vals[i], time)));
     }
+  };
+  for (const t of p.tracks) {
+    const n = g.tracks.get(t.id);
+    if (!n || !t.autoOn) continue;
+    if (t.auto.length) {
+      ramp([n.lp.frequency, n.hp.frequency, n.lp.Q, n.hp.Q], (b) => {
+        const [lp, hp, q] = filterFreqs(autoValueAt(t.auto, b, t.filter));
+        return [lp, hp, q, q];
+      });
+    }
+    if (t.volAuto?.length) {
+      const pts = t.volAuto;
+      ramp([n.autoVol.gain], (b) => [Math.pow(autoValueAt(pts, b, 1), 2)]);
+    }
+  }
+}
+
+/** Metronome clicks for every beat in [w0, w1): accented on the bar. Live playback only. */
+function scheduleClicks(g: Graph, p: RemixProject, cycle: Cycle, w0: number, w1: number, started: AudioScheduledSourceNode[]) {
+  const ctx = g.ctx;
+  const spb = 60 / p.bpm;
+  for (let b = Math.ceil(w0 - 1e-6); b < w1; b++) {
+    const when = cycle.ctxStart + (b - cycle.beatStart) * spb;
+    const o = ctx.createOscillator();
+    const env = ctx.createGain();
+    o.frequency.value = b % 4 === 0 ? 1760 : 1175;
+    env.gain.setValueAtTime(0.0001, when);
+    env.gain.exponentialRampToValueAtTime(0.35, when + 0.002);
+    env.gain.exponentialRampToValueAtTime(0.0001, when + 0.06);
+    o.connect(env).connect(g.master);
+    o.start(when);
+    o.stop(when + 0.07);
+    started.push(o);
   }
 }
 
@@ -285,13 +334,36 @@ function scheduleWindow(
   }
 }
 
-function clipGain(ctx: BaseAudioContext, dest: AudioNode, gain: number, when: number, stop: number): GainNode {
+/**
+ * Per-clip gain with fade in/out. The envelope is defined over the whole clip
+ * [clipStart, clipStop] so clips that start playing midway pick up at the right level.
+ */
+function clipGain(
+  ctx: BaseAudioContext,
+  dest: AudioNode,
+  clip: Clip,
+  when: number,
+  stop: number,
+  clipStart: number,
+  clipStop: number,
+  spb: number,
+): GainNode {
   const g = ctx.createGain();
-  const fade = Math.min(0.004, (stop - when) / 4);
-  g.gain.setValueAtTime(0, when);
-  g.gain.linearRampToValueAtTime(gain, when + fade);
-  g.gain.setValueAtTime(gain, Math.max(when + fade, stop - fade));
-  g.gain.linearRampToValueAtTime(0, stop);
+  const edge = 0.004;
+  const fin = Math.max(edge, (clip.fadeIn ?? 0) * spb);
+  const fout = Math.max(edge, (clip.fadeOut ?? 0) * spb);
+  const inEnd = clipStart + fin;
+  const outStart = Math.max(inEnd, clipStop - fout);
+  const level = (t: number) => clip.gain * Math.max(0, Math.min(1, (t - clipStart) / fin, (clipStop - t) / fout));
+  g.gain.setValueAtTime(when > clipStart + 1e-4 ? Math.min(level(when), clip.gain) : 0, when);
+  if (inEnd > when) g.gain.linearRampToValueAtTime(clip.gain, inEnd);
+  if (outStart > when) g.gain.setValueAtTime(level(outStart), outStart);
+  g.gain.linearRampToValueAtTime(0, Math.max(when + edge, clipStop));
+  // a loop boundary or stop earlier than the clip end still needs a click-free edge
+  if (stop < clipStop - edge) {
+    g.gain.cancelAndHoldAtTime(stop - edge);
+    g.gain.linearRampToValueAtTime(0, stop);
+  }
   g.connect(dest);
   return g;
 }
@@ -327,7 +399,7 @@ function scheduleAudio(
     offset = 0;
   }
   if (when >= stop || offset >= src.buffer.duration) return;
-  node.connect(clipGain(ctx, dest, clip.gain, when, stop));
+  node.connect(clipGain(ctx, dest, clip, when, stop, at(clip.start), at(clipEnd(clip)), spb));
   node.start(when, offset);
   node.stop(stop);
   started.push(node);
@@ -348,7 +420,7 @@ function scheduleRiser(
   const stop = at(end);
   const total = clip.length * spb;
   const done = (trigger - clip.start) / clip.length; // fraction already elapsed if starting mid-clip
-  const out = clipGain(ctx, dest, clip.gain, when, stop);
+  const out = clipGain(ctx, dest, clip, when, stop, at(clip.start), at(clipEnd(clip)), spb);
   if (clip.variant === 'impact') {
     const o = ctx.createOscillator();
     const og = ctx.createGain();
@@ -439,6 +511,7 @@ class RemixEngine {
   private scheduledTo = 0;
   private timer: number | null = null;
   playing = false;
+  metronome = false;
   private stoppedAt = 0;
 
   private graph(): Graph {
@@ -520,6 +593,7 @@ class RemixEngine {
       const w1 = Math.min(horizonBeat, cyc.beatEnd);
       if (w1 > this.scheduledTo) {
         scheduleWindow(this.graph(), p, cyc, this.scheduledTo, w1, this.lookupSource, this.lookupDrum, this.started);
+        if (this.metronome) scheduleClicks(this.graph(), p, cyc, this.scheduledTo, w1, this.started);
         this.scheduledTo = w1;
       }
       if (horizonBeat < cyc.beatEnd) break;

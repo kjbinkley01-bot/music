@@ -78,9 +78,14 @@ def test_full_flow(click_track, tmp_path):
         # separation job for a track can be queued and cancelled
         job = client.post("/jobs/separate", json={"track_ids": [t["id"]], "quality": "fast"}).json()["jobs"][0]
         client.post(f"/jobs/{job}/cancel")
-        time.sleep(1.0)
-        status = client.get("/status").json()
-        assert all(j["status"] in ("canceled", "error", "done") for j in status["jobs"] if j["id"] == job)
+        # a running separation notices the cancel once its child process is up; allow for that
+        end = time.time() + 60
+        while time.time() < end:
+            states = [j["status"] for j in client.get("/status").json()["jobs"] if j["id"] == job]
+            if states and states[0] in ("canceled", "error", "done"):
+                break
+            time.sleep(0.3)
+        assert states and states[0] == "canceled", states
 
         # soundcloud is optional and reports unconfigured
         assert client.get("/soundcloud/status").json()["configured"] is False
