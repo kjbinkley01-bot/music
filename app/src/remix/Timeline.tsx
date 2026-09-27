@@ -14,9 +14,7 @@ const HEADER_W = 232;
 const RULER_H = 28;
 const AUTO_H = 56;
 
-function laneHeight(t: RemixTrack) {
-  return t.kind === 'audio' ? 66 : 50;
-}
+const LANE_H = 84;
 
 /** Create an audio clip for a library track stem, positioned at `beat`. */
 export function makeAudioClip(track: Track, stem: SourceStem, beat: number, project: RemixProject, autoKey: boolean): AudioClip {
@@ -511,7 +509,7 @@ export function Timeline({ autoKey }: { autoKey: boolean }) {
 
         {/* Tracks */}
         {project.tracks.map((t, i) => {
-          const h = laneHeight(t);
+          const h = LANE_H;
           return (
             <div key={t.id} style={{ borderBottom: '1px solid var(--line)' }}>
               <div style={{ display: 'flex' }}>

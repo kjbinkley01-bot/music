@@ -35,6 +35,41 @@ def make_click_track(path: Path, bpm: float = 124.0, seconds: float = 16.0, sr: 
     return path
 
 
+def make_song(path: Path, bpm: float, root_hz: float, minor: bool, seconds: float = 45.0, offset: float = 0.0,
+              seed: int = 0, sr: int = 44100) -> Path:
+    """Kick, off-beat hats, bass and diatonic chords (minor i-VI-III-VII / major I-V-vi-IV)."""
+    rng = np.random.default_rng(seed)
+    n = int(sr * seconds)
+    y = np.zeros(n)
+    beat = 60.0 / bpm
+
+    def add(sig, start):
+        s = int(start * sr)
+        e = min(n, s + len(sig))
+        if 0 <= s < n:
+            y[s:e] += sig[: e - s]
+
+    tt = np.arange(int(0.2 * sr)) / sr
+    kick = np.sin(2 * np.pi * (45 + 110 * np.exp(-tt * 28)) * tt) * np.exp(-tt * 14) * 0.9
+    hat = rng.uniform(-1, 1, int(0.05 * sr)) * np.exp(-np.arange(int(0.05 * sr)) / sr * 80) * 0.15
+    prog = [(0, 1), (8, 0), (3, 0), (10, 0)] if minor else [(0, 0), (7, 0), (9, 1), (5, 0)]
+    k = 0
+    while offset + k * beat < seconds:
+        start = offset + k * beat
+        add(kick, start)
+        add(hat, start + beat / 2)
+        ch, mi = prog[(k // 4) % 4]
+        bt = np.arange(int(beat * 0.9 * sr)) / sr
+        add(np.sin(2 * np.pi * root_hz / 2 * 2 ** (ch / 12) * bt) * 0.25 * np.exp(-bt * 3), start)
+        if k % 4 == 0:
+            pt = np.arange(int(4 * beat * sr)) / sr
+            add(sum(np.sin(2 * np.pi * root_hz * 2 ** ((ch + iv) / 12) * pt) for iv in (0, 3 if mi else 4, 7)) * 0.05, start)
+        k += 1
+    y /= np.max(np.abs(y)) * 1.1
+    sf.write(str(path), np.stack([y, y], axis=1).astype(np.float32), sr)
+    return path
+
+
 @pytest.fixture(scope="session")
 def data_dir() -> Path:
     return Path(_DATA)

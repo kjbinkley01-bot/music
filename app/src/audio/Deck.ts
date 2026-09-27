@@ -283,6 +283,16 @@ export class Deck {
     return clamp((this.rate - 1) / this.pitchRange, -1, 1);
   }
 
+  setQuantize(on: boolean) {
+    this.quantize = on;
+    this.emit();
+  }
+
+  setPitchRange(range: number) {
+    this.pitchRange = range;
+    this.emit();
+  }
+
   setKeyLock(on: boolean) {
     this.keyLock = on;
     this.post({ type: 'keylock', on });

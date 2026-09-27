@@ -37,16 +37,19 @@ function drawGrid(ctx: CanvasRenderingContext2D, deck: Deck, t0: number, t1: num
   if (!deck.bpm) return;
   const spb = deck.beatLength;
   const pxPerSec = w / (t1 - t0);
-  if (spb * pxPerSec < 3) return;
-  const firstBeat = Math.ceil(deck.beatAt(t0));
-  for (let b = firstBeat; ; b++) {
+  // Thin out the grid when zoomed out: beats need 6px, bars 6px, otherwise draw nothing.
+  const beatPx = spb * pxPerSec;
+  if (beatPx * 4 < 6) return;
+  const step = beatPx < 6 ? 4 : 1;
+  const firstBeat = Math.ceil(deck.beatAt(t0) / step) * step;
+  for (let b = firstBeat; ; b += step) {
     const t = deck.timeOfBeat(b);
     if (t > t1) break;
     const x = Math.round((t - t0) * pxPerSec) + 0.5;
     const bar = ((b % 4) + 4) % 4 === 0;
     ctx.fillStyle = bar ? `rgba(255,255,255,${0.32 * alpha})` : `rgba(255,255,255,${0.1 * alpha})`;
     ctx.fillRect(x, 0, 1, h);
-    if (bar && spb * 4 * pxPerSec > 34) {
+    if (bar && beatPx * 4 > 34) {
       ctx.fillStyle = `rgba(255,255,255,${0.45 * alpha})`;
       ctx.font = '9px ui-monospace, monospace';
       ctx.fillText(String(Math.floor(b / 4) + 1), x + 3, 10);

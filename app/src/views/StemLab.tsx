@@ -452,7 +452,7 @@ function Player() {
                     <button className={`btn sm ${deck.stemMute[s.name] ? 'on' : ''}`} style={{ ['--c' as string]: 'var(--bad)' }} onClick={() => deck.toggleMute(s.name)} title={`Mute (${i + 1})`}>
                       M
                     </button>
-                    <Fader orientation="horizontal" length={120} max={1.5} value={deck.stemGain[s.name] ?? 1} defaultValue={1} onChange={(v) => deck.setStemGain(s.name, v)} />
+                    <Fader orientation="horizontal" length={92} max={1.5} value={deck.stemGain[s.name] ?? 1} defaultValue={1} onChange={(v) => deck.setStemGain(s.name, v)} />
                   </div>
                 </div>
               );
@@ -522,7 +522,7 @@ export function StemLab() {
   const selected = trackById(selectedId);
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(460px, 44%) 1fr', gap: 12, height: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(460px, 44%) minmax(0, 1fr)', gap: 12, height: '100%' }}>
       <div className="glass panel">
         <div className="panel-head">
           <span className="panel-title">Library</span>

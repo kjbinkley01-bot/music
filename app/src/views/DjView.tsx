@@ -97,26 +97,24 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
             <button className="btn big" onClick={() => deck.syncTo(other)} disabled={!t || !other.track} title="Match tempo and beat phase to the other deck">
               <IconSync size={16} /> SYNC
             </button>
-          </div>
-          <div className="row" style={{ gap: 4 }}>
-            <button className={`btn sm ${deck.keyLock ? 'on' : ''}`} onClick={() => deck.setKeyLock(!deck.keyLock)}>
-              Key lock
-            </button>
-            <button className={`btn sm ${deck.quantize ? 'on' : ''}`} onClick={() => ((deck.quantize = !deck.quantize), deck.setRate(deck.rate))}>
-              Quantize
-            </button>
-            <div className="spacer" />
-            <button className="btn sm" onPointerDown={() => deck.setNudge(-0.04)} onPointerUp={() => deck.setNudge(0)} onPointerLeave={() => deck.setNudge(0)} title="Nudge slower (hold)">
-              ◀◀
-            </button>
-            <button className="btn sm" onPointerDown={() => deck.setNudge(0.04)} onPointerUp={() => deck.setNudge(0)} onPointerLeave={() => deck.setNudge(0)} title="Nudge faster (hold)">
-              ▶▶
-            </button>
+            <div className="col" style={{ gap: 4 }}>
+              <button className={`btn sm ${deck.keyLock ? 'on' : ''}`} onClick={() => deck.setKeyLock(!deck.keyLock)} title="Keep pitch when changing tempo">
+                Key lock
+              </button>
+              <button className={`btn sm ${deck.quantize ? 'on' : ''}`} onClick={() => deck.setQuantize(!deck.quantize)} title="Snap cues and loops to the beat grid">
+                Quantize
+              </button>
+            </div>
+            <div className="col" style={{ gap: 4 }}>
+              <button className="btn sm" onPointerDown={() => deck.setNudge(0.04)} onPointerUp={() => deck.setNudge(0)} onPointerLeave={() => deck.setNudge(0)} title="Nudge faster (hold)">
+                ▶▶
+              </button>
+              <button className="btn sm" onPointerDown={() => deck.setNudge(-0.04)} onPointerUp={() => deck.setNudge(0)} onPointerLeave={() => deck.setNudge(0)} title="Nudge slower (hold)">
+                ◀◀
+              </button>
+            </div>
           </div>
           <div>
-            <div className="faint" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 4 }}>
-              HOT CUES <span style={{ fontWeight: 400 }}>· shift-click to clear</span>
-            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(8, 1fr)', gap: 4 }}>
               {Array.from({ length: 8 }, (_, i) => {
                 const cue = deck.cues.find((c) => c.index === i);
@@ -128,7 +126,7 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
                     disabled={!t}
                     style={cue ? { background: `${col}33`, borderColor: col, color: '#fff' } : undefined}
                     onClick={(e) => (e.shiftKey ? void deck.deleteHotCue(i) : deck.hotCue(i))}
-                    title={cue ? `${fmtTime(cue.time, true)} — click to jump, shift-click to clear` : 'Set hot cue here'}
+                    title={cue ? `Hot cue ${i + 1} at ${fmtTime(cue.time, true)} — click to jump, shift-click to clear` : `Set hot cue ${i + 1} here`}
                   >
                     {i + 1}
                   </button>
@@ -137,12 +135,9 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
             </div>
           </div>
           <div>
-            <div className="faint" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 4 }}>
-              BEAT LOOP
-            </div>
             <div className="row" style={{ gap: 4 }}>
               {[1, 2, 4, 8, 16].map((b) => (
-                <button key={b} className={`btn sm grow ${deck.loop?.beats === b ? 'on' : ''}`} disabled={!t?.bpm} onClick={() => deck.beatLoop(b)}>
+                <button key={b} className={`btn sm grow ${deck.loop?.beats === b ? 'on' : ''}`} disabled={!t?.bpm} onClick={() => deck.beatLoop(b)} title={`${b}-beat loop`}>
                   {b}
                 </button>
               ))}
@@ -155,15 +150,18 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
             </div>
           </div>
           <div>
-            <div className="faint" style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', marginBottom: 4 }}>
-              STEMS {t && deck.sources.length < 2 && <span style={{ fontWeight: 400 }}>· separate this track in Stem Lab to enable</span>}
-            </div>
             <div className="row" style={{ gap: 4 }}>
               {STEMS.map((s) => {
                 const has = deck.hasStem(s);
                 const on = has && !deck.stemMute[s];
                 return (
-                  <button key={s} className={`btn sm grow stem-${s} ${on ? 'on' : ''}`} disabled={!has} onClick={() => deck.toggleMute(s)}>
+                  <button
+                    key={s}
+                    className={`btn sm grow stem-${s} ${on ? 'on' : ''}`}
+                    disabled={!has}
+                    onClick={() => deck.toggleMute(s)}
+                    title={has ? `Toggle ${STEM_LABEL[s].toLowerCase()}` : 'Separate this track in Stem Lab to use stems'}
+                  >
                     {STEM_LABEL[s]}
                   </button>
                 );
@@ -173,12 +171,12 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
         </div>
         <div className="col" style={{ alignItems: 'center', gap: 4 }}>
           <span className="knob-label">Pitch</span>
-          <Fader value={deck.pitchFader} min={-1} max={1} onChange={(v) => deck.setPitchFader(v)} length={170} centerDetent defaultValue={0} invert title="Double-click to reset" />
+          <Fader value={deck.pitchFader} min={-1} max={1} onChange={(v) => deck.setPitchFader(v)} length={150} centerDetent defaultValue={0} invert title="Double-click to reset" />
           <span className="mono" style={{ fontSize: 11 }}>
             {deck.rate >= 1 ? '+' : ''}
             {((deck.rate - 1) * 100).toFixed(1)}%
           </span>
-          <select className="select sm" value={deck.pitchRange} onChange={(e) => ((deck.pitchRange = Number(e.target.value)), deck.setRate(deck.rate))}>
+          <select className="select sm" value={deck.pitchRange} onChange={(e) => deck.setPitchRange(Number(e.target.value))}>
             <option value={0.08}>±8%</option>
             <option value={0.16}>±16%</option>
             <option value={0.5}>±50%</option>
@@ -192,18 +190,20 @@ function DeckPanel({ index }: { index: 0 | 1 }) {
 function Channel({ deck, accent }: { deck: Deck; accent: string }) {
   useSubscribe(deck);
   const eq = (band: 'high' | 'mid' | 'low', label: string) => (
-    <Knob value={deck.eq[band]} min={-26} max={6} defaultValue={0} onChange={(v) => deck.setEq(band, v)} label={label} color={accent} format={(v) => (v <= -25.5 ? 'KILL' : `${v.toFixed(1)} dB`)} />
+    <Knob size={32} value={deck.eq[band]} min={-26} max={6} defaultValue={0} onChange={(v) => deck.setEq(band, v)} label={label} color={accent} format={(v) => (v <= -25.5 ? 'KILL' : `${v.toFixed(1)} dB`)} />
   );
   return (
-    <div className="col" style={{ alignItems: 'center', gap: 8 }}>
+    <div className="col" style={{ alignItems: 'center', gap: 6 }}>
       <div className="mono" style={{ color: accent, fontWeight: 800 }}>
         {deck.id}
       </div>
-      {eq('high', 'High')}
-      {eq('mid', 'Mid')}
-      {eq('low', 'Low')}
-      <Knob value={deck.filter} min={-1} max={1} bipolar onChange={(v) => deck.setFilter(v)} label="Filter" color="#b98cff" format={(v) => (Math.abs(v) < 0.04 ? 'OFF' : v < 0 ? `LP ${Math.round(-v * 100)}` : `HP ${Math.round(v * 100)}`)} />
-      <Fader value={deck.volume} max={1} onChange={(v) => deck.setVolume(v)} length={130} defaultValue={1} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 6px' }}>
+        {eq('high', 'High')}
+        {eq('mid', 'Mid')}
+        {eq('low', 'Low')}
+        <Knob size={32} value={deck.filter} min={-1} max={1} bipolar onChange={(v) => deck.setFilter(v)} label="Filter" color="#b98cff" format={(v) => (Math.abs(v) < 0.04 ? 'OFF' : v < 0 ? `LP ${Math.round(-v * 100)}` : `HP ${Math.round(v * 100)}`)} />
+      </div>
+      <Fader value={deck.volume} max={1} onChange={(v) => deck.setVolume(v)} length={110} defaultValue={1} title="Channel volume" />
     </div>
   );
 }
@@ -212,13 +212,13 @@ function Mixer() {
   const engine = dj();
   const { xfade, curve, recording, recordSeconds, recordPeak, recordFormat, masterVolume } = useDj();
   return (
-    <div className="glass panel" style={{ padding: 12, alignItems: 'center', gap: 10, width: 220 }}>
-      <div className="panel-title">Mixer</div>
-      <div className="row" style={{ gap: 18, alignItems: 'flex-start' }}>
+    <div className="glass panel" style={{ padding: 10, alignItems: 'center', gap: 8, width: 250 }}>
+      <div className="row" style={{ width: '100%' }}>
+        <span className="panel-title grow">Mixer</span>
+        <Knob value={masterVolume} min={0} max={1} defaultValue={0.9} onChange={(v) => engine.setMasterVolume(v)} size={26} title="Master volume" format={(v) => `Master ${Math.round(v * 100)}%`} />
+      </div>
+      <div className="row" style={{ gap: 14, alignItems: 'flex-start' }}>
         <Channel deck={engine.decks[0]} accent={ACCENT[0]} />
-        <div className="col" style={{ alignItems: 'center', gap: 6, paddingTop: 20 }}>
-          <Knob value={masterVolume} min={0} max={1} defaultValue={0.9} onChange={(v) => engine.setMasterVolume(v)} label="Master" size={34} />
-        </div>
         <Channel deck={engine.decks[1]} accent={ACCENT[1]} />
       </div>
       <Fader orientation="horizontal" value={xfade} min={-1} max={1} onChange={(v) => engine.setCrossfader(v)} length={180} centerDetent defaultValue={0} title="Crossfader (Shift + ← / →)" />
@@ -230,7 +230,7 @@ function Mixer() {
           Sharp
         </button>
       </div>
-      <div className="row" style={{ marginTop: 'auto' }}>
+      <div className="row">
         <button className={`btn ${recording ? 'on' : ''}`} style={{ ['--c' as string]: 'var(--bad)' }} onClick={() => (recording ? void engine.stopRecording() : void engine.startRecording())}>
           <IconRecord size={12} style={{ color: 'var(--bad)' }} /> {recording ? fmtTime(recordSeconds) : 'Record'}
         </button>
@@ -320,10 +320,10 @@ export function DjView() {
   }, [a.version, b.version]);
 
   return (
-    <div style={{ display: 'grid', gridTemplateRows: 'auto auto minmax(0, 1fr)', gap: 12, height: '100%' }}>
+    <div style={{ display: 'grid', gridTemplateRows: 'auto auto minmax(150px, 1fr)', gridTemplateColumns: 'minmax(0, 1fr)', gap: 10, height: '100%' }}>
       <div className="glass" style={{ padding: 6, position: 'relative' }}>
         {[a, b].map((d, i) => (
-          <div key={d.id} style={{ height: 84, borderBottom: i === 0 ? '1px solid var(--line)' : undefined }}>
+          <div key={d.id} style={{ height: 72, borderBottom: i === 0 ? '1px solid var(--line)' : undefined }}>
             <ScrollingWaveform deck={d} accent={ACCENT[i]} zoom={zoom} />
           </div>
         ))}
@@ -335,7 +335,7 @@ export function DjView() {
           ))}
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: 12 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto minmax(0, 1fr)', gap: 10 }}>
         <DeckPanel index={0} />
         <Mixer />
         <DeckPanel index={1} />

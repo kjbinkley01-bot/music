@@ -58,6 +58,7 @@ export const useRemix = create<RemixState>((set, get) => {
         future: history ? [] : get().future,
       });
       remixEngine.update(next, useApp.getState().tracks, structural);
+      if (structural) preloadProject(next);
     },
     checkpoint: () => set({ past: [...get().past, get().project].slice(-MAX_HISTORY), future: [] }),
     undo: () => {
@@ -66,6 +67,7 @@ export const useRemix = create<RemixState>((set, get) => {
       const prev = past[past.length - 1];
       set({ project: prev, past: past.slice(0, -1), future: [project, ...future], dirty: true });
       remixEngine.update(prev, useApp.getState().tracks, true);
+      preloadProject(prev);
     },
     redo: () => {
       const { past, project, future } = get();
@@ -73,6 +75,7 @@ export const useRemix = create<RemixState>((set, get) => {
       const next = future[0];
       set({ project: next, past: [...past, project], future: future.slice(1), dirty: true });
       remixEngine.update(next, useApp.getState().tracks, true);
+      preloadProject(next);
     },
     load: (id, project) => {
       remixEngine.stop();

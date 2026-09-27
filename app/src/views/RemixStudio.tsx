@@ -850,8 +850,8 @@ export function RemixStudio() {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr) 250px', gap: 12, height: '100%' }}>
-      <div className="glass row" style={{ padding: '8px 12px', gap: 10, flexWrap: 'wrap' }}>
+    <div style={{ display: 'grid', gridTemplateRows: 'auto minmax(0, 1fr) 250px', gridTemplateColumns: 'minmax(0, 1fr)', gap: 12, height: '100%' }}>
+      <div className="glass row" style={{ padding: '8px 12px', gap: 8, flexWrap: 'wrap' }}>
         <PlayButton />
         <button className="btn icon" title="Back to start (Home)" onClick={() => remixEngine.setPosition(project.loopOn && project.loop ? project.loop.start : 0)}>
           ⏮
@@ -862,9 +862,9 @@ export function RemixStudio() {
         <Position />
         <BpmInput />
         <KeySelect />
-        <label className="row faint" style={{ fontSize: 11, gap: 4 }} title="New clips are pitch-shifted onto the project key automatically">
-          <input type="checkbox" checked={autoKey} onChange={(e) => setAutoKey(e.target.checked)} /> Auto key
-        </label>
+        <button className={`btn sm ${autoKey ? 'on' : ''}`} onClick={() => setAutoKey(!autoKey)} title="Pitch-shift new clips onto the project key automatically">
+          Auto key
+        </button>
         <select className="select sm" value={snap} onChange={(e) => useRemix.getState().set({ snap: Number(e.target.value) })} title="Snap to grid">
           <option value={4}>Snap: bar</option>
           <option value={1}>Snap: beat</option>
@@ -872,7 +872,7 @@ export function RemixStudio() {
           <option value={0.25}>Snap: 1/16</option>
           <option value={0}>Snap: off</option>
         </select>
-        <input type="range" min={6} max={120} value={zoom} onChange={(e) => useRemix.getState().set({ zoom: Number(e.target.value) })} style={{ width: 90 }} title="Zoom" />
+        <input type="range" min={6} max={120} value={zoom} onChange={(e) => useRemix.getState().set({ zoom: Number(e.target.value) })} style={{ width: 64 }} title="Zoom" />
         <div className="row" style={{ gap: 4 }}>
           <button className="btn sm icon" disabled={!canUndo} onClick={() => useRemix.getState().undo()} title="Undo (Ctrl+Z)">
             <IconUndo size={13} />
@@ -905,7 +905,7 @@ export function RemixStudio() {
         </select>
         {loading > 0 && <span className="chip busy">Stretching {loading}…</span>}
         <div className="spacer" />
-        <input className="input sm" style={{ width: 170 }} value={project.name} onChange={(e) => useRemix.getState().edit((p) => (p.name = e.target.value), { structural: false, history: false })} />
+        <input className="input sm" style={{ width: 120 }} value={project.name} title="Project name" onChange={(e) => useRemix.getState().edit((p) => (p.name = e.target.value), { structural: false, history: false })} />
         {dirty && <span className="faint" title="Unsaved changes">●</span>}
         <button className="btn sm" onClick={newProjectClick}>
           New
@@ -920,7 +920,7 @@ export function RemixStudio() {
           <IconExport size={13} /> Export
         </button>
       </div>
-      <div style={{ display: 'flex', gap: 12, minHeight: 0 }}>
+      <div style={{ display: 'flex', gap: 12, minHeight: 0, minWidth: 0 }}>
         <Browser />
         <div className="glass panel grow">
           <Timeline autoKey={autoKey} />

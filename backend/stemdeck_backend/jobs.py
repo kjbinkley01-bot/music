@@ -172,7 +172,9 @@ class JobManager:
             except Exception as exc:  # noqa: BLE001
                 log.exception("Separation failed for %s", track["path"])
                 shutil.rmtree(tmp_dir, ignore_errors=True)
-                db.update_track(track["id"], stem_status="error", error=str(exc))
+                # A failed re-run (e.g. HQ after fast) keeps the stems we already have.
+                had_stems = bool(track["stem_dir"]) and Path(track["stem_dir"]).exists()
+                db.update_track(track["id"], stem_status="done" if had_stems else "error", error=str(exc))
                 db.update_job(job_id, status="error", message=str(exc), finished_at=time.time())
             finally:
                 self._live.pop(job_id, None)
