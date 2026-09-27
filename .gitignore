@@ -5,8 +5,8 @@ app/release/
 
 # Python
 backend/.venv/
-backend/build/
-backend/dist/
+backend/build
+backend/dist
 backend/bin/
 __pycache__/
 *.pyc
